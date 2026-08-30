@@ -506,10 +506,27 @@ async function buildContents(options, attachments, signal, model) {
       const name = toolNames.get(block.toolCallId) ?? "tool";
       const text = serializeBlocks(block.content);
       const response = block.isError === true ? { error: text } : { result: text };
-      push("user", [{ functionResponse: { name, response } }]);
+      const parts = [{ functionResponse: { name, response } }];
+      // 多模态工具结果（DSH read_image 会随信封返回 image block）：Gemini 3+
+      // 支持 functionResponse 与 inlineData 并存，把图片本身喂给模型。
+      if (block.isError !== true && isGeminiFamily(model.id)) {
+        for (const sub of block.content ?? []) {
+          if (sub?.type !== "image") continue;
+          if (!attachments || typeof attachments.readImage !== "function") break;
+          const stored = await attachments.readImage(sub.attachment, signal);
+          const mimeType = stored?.ref?.mediaType ?? sub.attachment?.mediaType ?? "image/jpeg";
+          const data = stored?.data ?? new Uint8Array();
+          parts.push({ inlineData: { mimeType, data: Buffer.from(data).toString("base64") } });
+        }
+      }
+      push("user", parts);
     }
   }
   return contents;
+}
+
+function isGeminiFamily(modelId) {
+  return !modelId.startsWith("claude-") && !modelId.startsWith("gpt-oss-");
 }
 
 function buildTools(options) {
