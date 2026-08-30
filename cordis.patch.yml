@@ -1,0 +1,8 @@
+# dsh-gemini-oauth bundle patch: register the Gemini (Antigravity) adapter as
+# one new loader row. There is no apiKeyEnv — this provider authenticates with
+# a Google subscription OAuth, not a console API key.
+- insert:
+    - id: llm-gemini-oauth
+      name: 'dsh-gemini-oauth'
+      config:
+        proxy: ''
