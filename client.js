@@ -156,10 +156,11 @@ window.__ModuleLoader__.load({
 .dgo-model-text{min-width:0;flex:1 1 auto}
 .dgo-model-name{display:block;font-size:13px;font-weight:650;color:#111827;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dgo-model-sub{display:block;margin-top:2px;color:#9aa3b0;font-size:12px;line-height:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.dgo-chip{display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:8px;font-size:13px;font-weight:500;color:#4b5563;cursor:default;position:relative;user-select:none;margin:0 4px}
-.dgo-chip:hover{background:rgba(0,0,0,0.05)}
-.dgo-chip-danger{color:#dc2626;background:#fef2f2}
-.dgo-chip-danger:hover{background:#fee2e2}
+.dgo-chip{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:inherit;cursor:default;position:relative;user-select:none;white-space:nowrap;flex:0 0 auto !important;line-height:20px}
+.dgo-chip:not(:last-child)::after{content:"|";color:var(--dsw-alias-separator-primary, rgba(0,0,0,0.2));margin:0 10px;font-size:12px;line-height:20px}
+.dgo-chip:hover{opacity:0.8}
+.dgo-chip-danger{color:#dc2626}
+.dgo-chip-danger:hover{opacity:0.8}
 .dgo-chip-icon{width:14px;height:14px;color:inherit;flex-shrink:0}
 .dgo-tooltip{position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);background:#111827;color:#fff;padding:10px 12px;border-radius:8px;font-size:12px;line-height:18px;white-space:nowrap;pointer-events:none;opacity:0;transition:opacity 0.15s;z-index:100;box-shadow:0 4px 12px rgba(0,0,0,0.15)}
 .dgo-chip:hover .dgo-tooltip{opacity:1}
@@ -579,28 +580,28 @@ window.__ModuleLoader__.load({
 
       const isDanger = parsed.geminiWeek !== null && parsed.geminiWeek < 10;
       const displayVal = isDanger ? parsed.geminiWeek : parsed.gemini5h;
-      const displayText = isDanger ? \`周告急 (\${displayVal}%)\` : \`\${displayVal}% 剩余\`;
+      const displayText = isDanger ? `周告急 (${displayVal}%)` : `${displayVal}% 剩余`;
 
-      return React.createElement("div", { className: \`dgo-chip \${isDanger ? "dgo-chip-danger" : ""}\` },
+      return React.createElement("div", { className: `dgo-chip ${isDanger ? "dgo-chip-danger" : ""}` },
         React.createElement(AntigravityIcon, { size: 14, className: "dgo-chip-icon" }),
         React.createElement("span", null, displayText),
         React.createElement("div", { className: "dgo-tooltip" },
           React.createElement("div", { className: "dgo-tt-title" }, "Gemini 额度详情"),
           parsed.gemini5h !== null && React.createElement("div", { className: "dgo-tt-row" },
             React.createElement("span", null, "Gemini 5小时剩余："),
-            React.createElement("span", { className: "dgo-tt-val" }, \`\${parsed.gemini5h}%\`)
+            React.createElement("span", { className: "dgo-tt-val" }, `${parsed.gemini5h}%`)
           ),
           parsed.geminiWeek !== null && React.createElement("div", { className: "dgo-tt-row" },
             React.createElement("span", null, "Gemini 本周剩余："),
-            React.createElement("span", { className: "dgo-tt-val" }, \`\${parsed.geminiWeek}%\`)
+            React.createElement("span", { className: "dgo-tt-val" }, `${parsed.geminiWeek}%`)
           ),
           parsed.claude5h !== null && React.createElement("div", { className: "dgo-tt-row", style: { marginTop: 10 } },
             React.createElement("span", null, "Claude/GPT 5h剩余："),
-            React.createElement("span", { className: "dgo-tt-val" }, \`\${parsed.claude5h}%\`)
+            React.createElement("span", { className: "dgo-tt-val" }, `${parsed.claude5h}%`)
           ),
           parsed.claudeWeek !== null && React.createElement("div", { className: "dgo-tt-row" },
             React.createElement("span", null, "Claude/GPT 本周剩余："),
-            React.createElement("span", { className: "dgo-tt-val" }, \`\${parsed.claudeWeek}%\`)
+            React.createElement("span", { className: "dgo-tt-val" }, `${parsed.claudeWeek}%`)
           )
         )
       );
@@ -620,17 +621,10 @@ window.__ModuleLoader__.load({
           label: () => "Gemini (Antigravity)",
         }, (props) => React.createElement(GeminiSettings, { ...props, ctx })));
 
-        ctx.slots.inject("conversation.input.dock", () => ctx.slots.register({
-          name: "conversation.input.dock",
-          id: "dsh-gemini-oauth-usage-input",
-          order: 50,
-          label: () => "Gemini (Antigravity)",
-        }, (props) => React.createElement(GeminiUsageChip, props)));
-
         ctx.slots.inject("conversation.composer.dock", () => ctx.slots.register({
           name: "conversation.composer.dock",
           id: "dsh-gemini-oauth-usage-dock",
-          order: 50,
+          order: -90,
           label: () => "Gemini (Antigravity)",
         }, (props) => React.createElement(GeminiUsageChip, props)));
       },

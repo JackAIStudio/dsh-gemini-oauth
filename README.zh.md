@@ -50,7 +50,7 @@ host 插件要重启 `dsh web` 才加载新的 `index.js`。
 - **某模型 400 "invalid argument"**：两件事——① 工具参数里的 `$schema` / `$defs` / `$ref` / `type` 数组（插件已白名单清洗 + `$defs` 展开）；② `maxOutputTokens` 超模型上限（pro 65535 / gpt-oss 32768 / claude 64000，插件已按族截断）。
 - **"Gemini 3.1 Pro (High)" 请求 400**：consumer 线上该模型的真实请求 id 是 `gemini-pro-agent`（`gemini-3.1-pro-high` 只是同名显示），插件已内置别名映射。
 - **主端点 429 "Resource has been exhausted"**：属端点级限流，与订阅余额无关（余额看 `retrieveUserQuotaSummary`）；daily 通路上不受影响。
-- **HTTP 400 "User location is not supported"**：Google 按出口 IP 限制地区（大陆不在支持列表）。确认插件设置卡「网络」已填代理（如 `127.0.0.1:7897`）且代理节点出口为受支持地区（美/日/新加坡/香港等）。
+- **HTTP 400 "User location is not supported"**：Google 按出口 IP 限制地区（大陆不在支持列表）。确认插件设置卡「网络」已填代理（如 `127.0.0.1:7897`）且代理节点出口为受支持地区（美/日/新加坡等）。该判定在 Google 侧偶发瞬时出现：插件现在会先同端点短延迟重试一次，再依次回退主端点（`cloudcode-pa`）；仍失败才向 DSH 报错，并附出口地区提示。
 - **图片输入报「需要 attachment 服务」**：附件服务是惰性解析的，首次请求即接入 `ctx.attachments`；若持续报错请确认 dsh web 已重启。
 - **工具调用后 400 "missing a thought_signature"**：工具闭环要求回传 `functionCall` 的 `thought_signature`（同一 provider+model 才有效）。插件会在流式输出时把签名存进块上并在下一轮回传；若自定义封装绕过了 DSH 的消息组装请确保保留了块上的 `thoughtSignature` 字段。
 

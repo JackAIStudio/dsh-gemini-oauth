@@ -610,10 +610,32 @@ function sanitizeToolCallId(raw, fallbackName) {
   return id.length <= 256 ? id : id.slice(0, 256);
 }
 
-// daily-cloudcode-pa 只服务 Flash/GPT-OSS 等日常模型：实测对 gemini-3.1-pro*
-// 固定返回 400「Request contains an invalid argument」（Pro 只在主端点部署）。
-// 注意：Pro 系（gemini-pro-agent / gemini-3.1-pro-low）在 daily consumer 线
-// 可用（IDE 实测），不再做「pro 不回退」特例；端点回退交给通用循环。
+// 端点回退策略：401/402 等确定性非法请求直接失败；其余（含 400）都尝试
+// 下一个端点——daily 偶发 Google 侧瞬时校验失败（«User location is not
+// supported» 属出口 IP 风控瞬时判定，主端点与重试可能成功），不能一 400
+// 就放弃（历史版本在此 break，导致「重启后重发就好」的假象）。
+const LOCATION_RETRY_PATTERN = /location is not supported/i;
+const LOCATION_RETRY_DELAY_MS = 1500;
+const LOCATION_HINT = "请确认出口 IP 在受支持地区：插件设置卡「网络」填代理（如 127.0.0.1:7897），且代理节点出口为 美/日/新加坡 等地区（大陆与部分机房 IP 会被 Google 拒绝）";
+
+function sleepMs(ms, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new LlmError("Gemini (Antigravity) 请求已取消", "ABORTED"));
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new LlmError("Gemini (Antigravity) 请求已取消", "ABORTED"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 async function* streamChunks(fetchImpl, options, model, creds, attachments) {
   let lastStatus;
   let lastErrorText = "";
@@ -631,33 +653,45 @@ async function* streamChunks(fetchImpl, options, model, creds, attachments) {
     const mergedUa = attributionUa
       ? `antigravity/1.15.8 darwin/arm64 (${attributionUa})`
       : "antigravity/1.15.8 darwin/arm64";
-    const response = await fetchImpl(`${endpoint}/v1internal:streamGenerateContent?alt=sse`, {
-      method: "POST",
-      headers: {
-        ...ccaHeaders(creds.access),
-        ...attributionRest,
-        "user-agent": mergedUa,
-        accept: "text/event-stream",
-        ...(model.id.startsWith("claude-") ? { "anthropic-beta": "interleaved-thinking-2025-05-14" } : {}),
-      },
-      body,
-      ...(options.signal === undefined ? {} : { signal: options.signal }),
-    });
-    lastStatus = response.status;
-    if (response.ok) {
+    const sendOnce = async () => {
+      const response = await fetchImpl(`${endpoint}/v1internal:streamGenerateContent?alt=sse`, {
+        method: "POST",
+        headers: {
+          ...ccaHeaders(creds.access),
+          ...attributionRest,
+          "user-agent": mergedUa,
+          accept: "text/event-stream",
+          ...(model.id.startsWith("claude-") ? { "anthropic-beta": "interleaved-thinking-2025-05-14" } : {}),
+        },
+        body,
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
+      });
+      const text = response.ok ? "" : await response.text().catch(() => "");
+      return { ok: response.ok, status: response.status, text, response };
+    };
+    let { ok, status, text, response } = await sendOnce();
+    // Google 侧「User location is not supported」被观察到是偶发瞬时判定
+    // （出口 IP 风控 / 账号供给漂移），同端点短延迟重试一次再进入回退。
+    if (!ok && status === 400 && LOCATION_RETRY_PATTERN.test(text)) {
+      await sleepMs(LOCATION_RETRY_DELAY_MS, options.signal);
+      ({ ok, status, text, response } = await sendOnce());
+    }
+    lastStatus = status;
+    if (ok) {
       yield* consumeSse(response, model);
       return;
     }
-    lastErrorText = await response.text().catch(() => "");
+    lastErrorText = text;
     // 保留每个端点的失败原因，最终错误里分别说明，避免把 503 容量不足
     // 误报成 429 配额耗尽（daily 无容量 → cloudcode-pa 429 的组合极易误导）。
-    endpointErrors.push(`${endpoint.replace("https://", "")} -> HTTP ${response.status}: ${friendlyError(response.status, lastErrorText)}`);
-    if (![403, 404, 429, 500, 502, 503, 504].includes(response.status)) break;
+    endpointErrors.push(`${endpoint.replace("https://", "")} -> HTTP ${status}: ${friendlyError(status, lastErrorText)}`);
+    if (![400, 403, 404, 429, 500, 502, 503, 504].includes(status)) break;
   }
   const combined = endpointErrors.join("；");
   const code = classifyError(combined);
+  const locationIssue = LOCATION_RETRY_PATTERN.test(combined);
   throw new LlmError(
-    `Gemini (Antigravity) 请求失败：${combined || `HTTP ${lastStatus ?? "?"}`}`,
+    `Gemini (Antigravity) 请求失败：${combined || `HTTP ${lastStatus ?? "?"}`}${locationIssue ? `\n${LOCATION_HINT}` : ""}`,
     code,
   );
 }
