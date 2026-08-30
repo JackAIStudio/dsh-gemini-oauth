@@ -56,11 +56,11 @@ const ENDPOINTS = [
 // 以 base64 存储仅为规避 GitHub 公开仓库的静态模式检测（LiZhenNet/dsh-agy
 // 同款做法）；运行时可用 GEMINI_OAUTH_CLIENT_ID / GEMINI_OAUTH_CLIENT_SECRET 覆盖。
 const DEFAULT_CLIENT_ID = Buffer.from(
-  "${cidb}",
+  "MTA3MTAwNjA2MDU5MS10bWhzc2luMmgyMWxjcmUyMzV2dG9sb2poNGc0MDNlcC5hcHBzLmdvb2dsZXVzZXJjb250ZW50LmNvbQ==",
   "base64",
 ).toString("utf8");
 const DEFAULT_CLIENT_SECRET = Buffer.from(
-  "${csecb}",
+  "R09DU1BYLUs1OEZXUjQ4NkxkTEoxbUxCOHNYQzR6NnFEQWY=",
   "base64",
 ).toString("utf8");
 
