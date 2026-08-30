@@ -51,6 +51,7 @@ host 插件要重启 `dsh web` 才加载新的 `index.js`。
 - **"Gemini 3.1 Pro (High)" 请求 400**：consumer 线上该模型的真实请求 id 是 `gemini-pro-agent`（`gemini-3.1-pro-high` 只是同名显示），插件已内置别名映射。
 - **主端点 429 "Resource has been exhausted"**：属端点级限流，与订阅余额无关（余额看 `retrieveUserQuotaSummary`）；daily 通路上不受影响。
 - **图片输入报「需要 attachment 服务」**：附件服务是惰性解析的，首次请求即接入 `ctx.attachments`；若持续报错请确认 dsh web 已重启。
+- **工具调用后 400 "missing a thought_signature"**：工具闭环要求回传 `functionCall` 的 `thought_signature`（同一 provider+model 才有效）。插件会在流式输出时把签名存进块上并在下一轮回传；若自定义封装绕过了 DSH 的消息组装请确保保留了块上的 `thoughtSignature` 字段。
 
 ## 目录结构
 

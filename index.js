@@ -412,7 +412,31 @@ function serializeBlocks(blocks) {
   }).filter((text) => text.length > 0).join("\n");
 }
 
-async function buildContents(options, attachments, signal) {
+// Gemini 工具闭环要求历史 functionCall / text part 带 thought_signature
+// （CCA 实测缺失即 400：missing a thought_signature in functionCall parts）。
+// 签名只在同一 provider+model 下有效，且需符合 base64 形态。
+const BASE64_SIGNATURE_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/;
+
+function isValidThoughtSignature(signature) {
+  return typeof signature === "string"
+    && signature.length > 0
+    && signature.length % 4 === 0
+    && BASE64_SIGNATURE_PATTERN.test(signature);
+}
+
+function resolvedThoughtSignature(isSameProviderAndModel, signature) {
+  return isSameProviderAndModel && isValidThoughtSignature(signature) ? signature : undefined;
+}
+
+function modelIdentity(message) {
+  const source = message?.source ?? {};
+  return {
+    provider: source.provider ?? message?.provider ?? "",
+    model: source.model ?? message?.model ?? "",
+  };
+}
+
+async function buildContents(options, attachments, signal, model) {
   const contents = [];
   const toolNames = new Map();
   const push = (role, parts) => {
@@ -427,15 +451,36 @@ async function buildContents(options, attachments, signal) {
   for (const message of options.messages) {
     if (message.role === "assistant") {
       const parts = [];
+      const identity = modelIdentity(message);
+      const isSameProviderAndModel = identity.provider === PROVIDER && identity.model === model.id;
       for (const block of message.content ?? []) {
-        if (block.type === "text") parts.push({ text: block.text });
-        else if (block.type === "tool-call") {
+        if (block.type === "text") {
+          // 空文本 part 会 400（复刻 CCA 行为：空串也拒）
+          if (!block.text || block.text.trim() === "") continue;
+          const signature = resolvedThoughtSignature(isSameProviderAndModel, block.textSignature);
+          parts.push({ text: block.text, ...(signature ? { thoughtSignature: signature } : {}) });
+        } else if (block.type === "reasoning") {
+          if (!block.text || block.text.trim() === "") continue;
+          if (isSameProviderAndModel) {
+            const signature = resolvedThoughtSignature(isSameProviderAndModel, block.thinkingSignature);
+            parts.push({ thought: true, text: block.text, ...(signature ? { thoughtSignature: signature } : {}) });
+          } else {
+            // 异模型：思考内容降级为纯文本（避免模型模仿思考标记）。
+            parts.push({ text: block.text });
+          }
+        } else if (block.type === "tool-call") {
           toolNames.set(block.id, block.name);
           let args = {};
           try { args = JSON.parse(block.arguments); } catch { /* 保底空对象 */ }
-          parts.push({ functionCall: { id: block.id, name: block.name, args } });
+          const signature = resolvedThoughtSignature(isSameProviderAndModel, block.thoughtSignature);
+          // Gemini 系 functionCall 不带 id（id 只在 claude/gpt-oss 线需要）。
+          const functionCall = { name: block.name, args };
+          if (model.id.startsWith("claude-") || model.id.startsWith("gpt-oss-")) {
+            functionCall.id = block.id;
+          }
+          parts.push({ ...(signature ? { thoughtSignature: signature } : {}), functionCall });
         }
-        // reasoning / image 块跳过：历史只传可见文本与工具调用。
+        // image 块跳过：历史只传可见文本与工具调用。
       }
       push("model", parts);
       continue;
@@ -496,7 +541,7 @@ function effortToThinkingLevel(effort) {
 
 async function buildRequest(options, model, projectId, access, attachments, signal) {
   const request = {
-    contents: await buildContents(options, attachments, signal),
+    contents: await buildContents(options, attachments, signal, model),
   };
   if (typeof options.system === "string" && options.system.length > 0) {
     request.systemInstruction = { role: "user", parts: [{ text: options.system }] };
@@ -636,8 +681,8 @@ async function* consumeSse(response, model) {
     if (current === undefined) return;
     const index = blocks.length - 1;
     const block = current.type === "text"
-      ? { type: "text", text: current.text }
-      : { type: "reasoning", text: current.text };
+      ? { type: "text", text: current.text, ...(current.textSignature ? { textSignature: current.textSignature } : {}) }
+      : { type: "reasoning", text: current.text, ...(current.thinkingSignature ? { thinkingSignature: current.thinkingSignature } : {}) };
     out.push({ type: "block-end", index, block });
     current = undefined;
   };
@@ -660,6 +705,11 @@ async function* consumeSse(response, model) {
         }
         const index = blocks.length - 1;
         current.text += part.text;
+        // 思考签名（thoughtSignature）可以出现在任意 part 上，首段带、后续可缺。
+        if (isValidThoughtSignature(part.thoughtSignature)) {
+          if (reasoning) current.thinkingSignature = part.thoughtSignature;
+          else current.textSignature = part.thoughtSignature;
+        }
         hasContent = true;
         out.push({ type: reasoning ? "reasoning-delta" : "text-delta", index, text: part.text });
       }
@@ -670,7 +720,14 @@ async function* consumeSse(response, model) {
         const args = isJsonRecord(part.functionCall.args) ? part.functionCall.args : {};
         const argsText = JSON.stringify(args);
         const index = blocks.length;
-        const block = { type: "tool-call", id: CallId(toolId), name: toolName, arguments: argsText };
+        const signature = isValidThoughtSignature(part.thoughtSignature) ? part.thoughtSignature : undefined;
+        const block = {
+          type: "tool-call",
+          id: CallId(toolId),
+          name: toolName,
+          arguments: argsText,
+          ...(signature ? { thoughtSignature: signature } : {}),
+        };
         blocks.push(block);
         hasContent = true;
         hasToolCall = true;
