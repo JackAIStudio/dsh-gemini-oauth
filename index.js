@@ -617,6 +617,7 @@ function sanitizeToolCallId(raw, fallbackName) {
 async function* streamChunks(fetchImpl, options, model, creds, attachments) {
   let lastStatus;
   let lastErrorText = "";
+  const endpointErrors = [];
   for (const endpoint of ENDPOINTS) {
     if (options.signal?.aborted) throw new LlmError("Gemini (Antigravity) 请求已取消", "ABORTED");
     // 每个端点配对各自项目（daily→consumer 项目；主端点→个人项目）。
@@ -648,10 +649,17 @@ async function* streamChunks(fetchImpl, options, model, creds, attachments) {
       return;
     }
     lastErrorText = await response.text().catch(() => "");
+    // 保留每个端点的失败原因，最终错误里分别说明，避免把 503 容量不足
+    // 误报成 429 配额耗尽（daily 无容量 → cloudcode-pa 429 的组合极易误导）。
+    endpointErrors.push(`${endpoint.replace("https://", "")} -> HTTP ${response.status}: ${friendlyError(response.status, lastErrorText)}`);
     if (![403, 404, 429, 500, 502, 503, 504].includes(response.status)) break;
   }
-  const friendly = friendlyError(lastStatus, lastErrorText);
-  throw new LlmError(`Gemini (Antigravity) 请求失败 (HTTP ${lastStatus ?? "?"})：${friendly}`, classifyError(friendly));
+  const combined = endpointErrors.join("；");
+  const code = classifyError(combined);
+  throw new LlmError(
+    `Gemini (Antigravity) 请求失败：${combined || `HTTP ${lastStatus ?? "?"}`}`,
+    code,
+  );
 }
 
 function friendlyError(status, text) {
@@ -676,6 +684,7 @@ function friendlyError(status, text) {
 
 function classifyError(message) {
   if (/\b(?:401|403)\b|invalid_grant|AUTH/i.test(message)) return "AUTH";
+  if (/no capacity|capacity|503/i.test(message)) return "CAPACITY";
   if (/quota|RESOURCE_EXHAUSTED|exhausted/i.test(message)) return "QUOTA_EXCEEDED";
   if (/\b429\b|rate.?limit/i.test(message)) return "RATE_LIMIT";
   if (/\btimeout|timed out|aborted/i.test(message)) return "TIMEOUT";
