@@ -1016,13 +1016,17 @@ export function apply(ctx, config) {
     return Buffer.concat(chunks).toString("utf8");
   };
 
-  const apiHandler = (method, run) => async (req, res) => {
+  // methodOrMap：单个 method 字符串，或 { GET: fn, POST: fn } 按 method 分发。
+  // 注意：webServer 同 path 二次注册会 throw，多 method 必须合并进一个 handler。
+  const apiHandler = (methodOrMap, run) => async (req, res) => {
     if (!isLoopbackAddress(req.socket?.remoteAddress)) {
       sendJson(res, 403, { ok: false, error: "仅支持本机访问" });
       return;
     }
-    if (req.method !== method) {
-      res.setHeader("allow", method);
+    const methods = typeof methodOrMap === "string" ? { [methodOrMap]: run } : methodOrMap;
+    const handler = methods[req.method ?? ""];
+    if (handler === undefined) {
+      res.setHeader("allow", Object.keys(methods).join(", ") || "GET, POST");
       sendJson(res, 405, { ok: false, error: "Method not allowed." });
       return;
     }
@@ -1030,7 +1034,7 @@ export function apply(ctx, config) {
     const onClose = () => ac.abort();
     res.on("close", onClose);
     try {
-      const result = await run(req, ac.signal);
+      const result = await handler(req, ac.signal);
       if (ac.signal.aborted) return;
       if (!result.ok) {
         sendJson(res, 200, { ok: false, error: result.error?.message ?? "请求失败" });
@@ -1056,8 +1060,14 @@ export function apply(ctx, config) {
         webServer.register({ kind: "exact", path: `${API_PATH}/login`, handler: apiHandler("POST", () => routeLogin()) }, "dsh-gemini-oauth/login"),
         webServer.register({ kind: "exact", path: `${API_PATH}/logout`, handler: apiHandler("POST", () => routeLogout()) }, "dsh-gemini-oauth/logout"),
         webServer.register({ kind: "exact", path: `${API_PATH}/quota`, handler: apiHandler("POST", (_req, signal) => routeQuota(signal)) }, "dsh-gemini-oauth/quota"),
-        webServer.register({ kind: "exact", path: `${API_PATH}/models`, handler: apiHandler("GET", (_req, signal) => routeModels(signal)) }, "dsh-gemini-oauth/models-get"),
-        webServer.register({ kind: "exact", path: `${API_PATH}/models`, handler: apiHandler("POST", (req, signal) => routeModelsSave(req, signal)) }, "dsh-gemini-oauth/models-post"),
+        webServer.register({
+          kind: "exact",
+          path: `${API_PATH}/models`,
+          handler: apiHandler({
+            GET: (_req, signal) => routeModels(signal),
+            POST: (req, signal) => routeModelsSave(req, signal),
+          }),
+        }, "dsh-gemini-oauth/models"),
       ];
       return () => {
         for (const dispose of disposers) {
