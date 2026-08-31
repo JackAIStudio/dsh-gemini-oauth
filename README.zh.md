@@ -8,17 +8,18 @@ DeepSeek Harness 自有、独立维护的 **Gemini (Google Antigravity / Cloud C
 
 - **Google 订阅 OAuth (PKCE) 登录 / 退出**——走 Antigravity / Cloud Code Assist 的公开客户端凭据，不要求 console API key。
 - **模型走订阅额度**：Gemini Flash / Pro（含 tiered 档位）、账号下的 Claude / GPT-OSS 都在模型选择器里，吃 5 小时桶 + 周桶。
-- **额度展示**：设置 → Gemini (Antigravity) 卡，显示 Gemini 与 Claude/GPT 两个池的额度进度与重置倒计时。
+- **额度展示**：设置 → Gemini OAuth 卡，显示 Gemini 与 Claude/GPT 两个池的额度进度与重置倒计时。
 - **模型白名单**：同一张设置卡里可按模型勾选 —— 勾选的才会出现在模型选择器；「全选 / 全不选」一键切换；持久化在 `$DSH_HOME/gemini-oauth-models.json`（未配置 = 全部可见）。
 - **代理自适应**：设置卡「网络」填 `host:port`（默认继承 `HTTPS_PROXY` / `ALL_PROXY`；`direct` 强制直连）。国内需要能出 Google。
 - **原生体验**：thinking（reasoning-delta）、流式输出、工具调用（functionDeclarations / functionCall）按 DSH 原生 chunk 协议映射；不注入厂商 system prompt。
 - **图片输入**：Gemini 家族模型支持粘贴图片（经 DSH attachment 服务解析成 `inlineData` 发给 CCA）；PDF / 音频 / 视频等媒体类型暂未接入。
 - 凭据写在 `$DSH_HOME/gemini-oauth.json`（0600），自动 refresh，网络抖动刷新失败不丢凭据。
+- **多账号**：设置卡可保存多个 Google 账号（`$DSH_HOME/gemini-oauth.json` v2：`accounts[]` + `activeAccountId`），切换 / 移除账号，每个账号独立刷新与额度展示；新登录账号自动成为 active。旧版单账号文件读取时自动迁移为 v2。
 - **端点/项目配对**：对齐官方 agy 客户端行为——个人账号（`loadCodeAssist` 无 `gcpManaged`）严格只用 `daily-cloudcode-pa` + consumer 项目（`aicode-consumers`）；企业/GCP 账号才允许回退 `cloudcode-pa`（`loadCodeAssist` 实时解析，30 分钟缓存）。个人账号访问 `cloudcode-pa` 恒返回 429（Google 将其 gating 给企业账号），不再做跨端点回退。
 
 ## 已知限制（后续迭代）
 
-- 单账号；不做多号池、设备指纹、429 自动轮换——那是风控面，社区已有人因此被 Google 封停。
+- 多账号仅支持**手动切换**（设置卡切换 active / 移除账号；新登录账号自动成为 active），不做号池轮换、设备指纹、429 自动轮换——那是风控面，社区已有人因此被 Google 封停。每个账号凭据独立存储、独立刷新；单请求内绝不混用账号 token。
 - 无 429 水位时的空响应只重试端点，不做 3 次指数退避（后续按 Grok 插件节奏加）。
 
 ## 安装
@@ -40,8 +41,8 @@ host 插件要重启 `dsh web` 才加载新的 `index.js`。
 ## 用法
 
 1. 重启 `dsh web`。
-2. 设置 → **Gemini (Antigravity)** → 登录（浏览器完成 Google OAuth）。
-3. 任意会话 `/model` 选择 `Gemini (Antigravity)` 下的模型（如 Gemini 3.6 Flash High / Gemini 3.1 Pro (High)）。
+2. 设置 → **Gemini OAuth** → 登录（浏览器完成 Google OAuth）。
+3. 任意会话 `/model` 选择 `Gemini OAuth` 下的模型（如 Gemini 3.6 Flash High / Gemini 3.1 Pro (High)）。
 4. 额度条在设置卡里；模型选择器中的模型来自 `fetchAvailableModels` 在线目录（5 分钟缓存），离线回退静态目录。
 
 ## 排错速查

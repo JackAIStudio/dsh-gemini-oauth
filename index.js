@@ -9,7 +9,10 @@
 // - 图片输入已接入（Gemini 家族模型经 attachment 服务解析为 inlineData）；
 //   PDF / 音频 / 视频等 CCA 声明过的媒体类型暂未接入。
 // - 不注入任何厂商 system prompt；system 槽来自 DSH。
-// - 单账号；多账号、设备指纹、号池轮换不做（也建议不要做——那是风控面）。
+// - 多账号（对齐 dsh-grok-oauth 的 v2 store）：可保存多个 Google 账号，
+//   同一时刻只有 active 账号参与对话与额度；设置页可切换/移除账号，
+//   新登录的账号自动成为 active。这是「多账号手动切换」，不是号池
+//   轮换——单请求内绝不混用账号的 token。
 import { randomBytes, createHash, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { mkdir, readFile, rename, unlink, writeFile, chmod } from "node:fs/promises";
@@ -25,7 +28,7 @@ export const name = "dsh-gemini-oauth";
 export const inject = ["llm"];
 
 export const PROVIDER = "gemini-oauth";
-export const PROVIDER_NAME = "Gemini (Antigravity)";
+export const PROVIDER_NAME = "Gemini OAuth";
 const SETTINGS_NS_TEXT = "llm-gemini-oauth";
 const NS = settingsNamespace(SETTINGS_NS_TEXT);
 const CREDENTIAL_FILENAME = "gemini-oauth.json";
@@ -153,6 +156,8 @@ function catalogFromLive(models) {
 // ---------------------------------------------------------------------------
 // 凭据与 OAuth
 // ---------------------------------------------------------------------------
+const CREDENTIAL_VERSION = 2;
+
 function credentialPath() {
   return dshHomePath(CREDENTIAL_FILENAME);
 }
@@ -168,18 +173,179 @@ function safeJson(text) {
   try { return JSON.parse(text); } catch { return undefined; }
 }
 
-async function readCredentialStore() {
-  try {
-    return JSON.parse(await readFile(credentialPath(), "utf8"));
-  } catch {
-    return undefined;
-  }
+// ---- 多账号 store（v2：{ version, activeAccountId, accounts: [...] }）----
+// 账号唯一键：email（小写）优先，缺 email 时用 projectId，再缺用 refresh 的
+// 指纹（老凭据可能没存 email）。切换/移除/展示 id 全部走 publicAccountId。
+function accountKeyOf(creds) {
+  if (typeof creds.email === "string" && creds.email.length > 0) return creds.email.toLowerCase();
+  if (typeof creds.projectId === "string" && creds.projectId.length > 0) return creds.projectId;
+  return undefined;
 }
 
-async function writeCredentialStore(creds) {
+function publicAccountId(creds) {
+  return accountKeyOf(creds) ?? (typeof creds.refresh === "string" && creds.refresh.length > 0
+    ? createHash("sha1").update(`gemini:${creds.refresh}`).digest("hex").slice(0, 16)
+    : undefined);
+}
+
+function sameAccount(left, right) {
+  const leftKey = accountKeyOf(left);
+  const rightKey = accountKeyOf(right);
+  return leftKey !== undefined && rightKey !== undefined && leftKey === rightKey;
+}
+
+function cloneAccount(creds) {
+  const out = {
+    access: creds.access,
+    refresh: creds.refresh,
+    expires: creds.expires,
+  };
+  if (typeof creds.projectId === "string" && creds.projectId.length > 0) out.projectId = creds.projectId;
+  if (typeof creds.email === "string" && creds.email.length > 0) out.email = creds.email;
+  if (typeof creds.tierName === "string" && creds.tierName.length > 0) out.tierName = creds.tierName;
+  return out;
+}
+
+function isAccountRecord(value) {
+  return typeof value === "object" && value !== null
+    && typeof value.access === "string" && value.access.length > 0
+    && typeof value.refresh === "string" && value.refresh.length > 0
+    && typeof value.expires === "number" && Number.isFinite(value.expires);
+}
+
+function emptyStore() {
+  return { version: CREDENTIAL_VERSION, accounts: [] };
+}
+
+function storeFromLegacy(creds) {
+  const cloned = cloneAccount(creds);
+  const id = publicAccountId(cloned);
+  return {
+    version: CREDENTIAL_VERSION,
+    ...(id !== undefined ? { activeAccountId: id } : {}),
+    accounts: [cloned],
+  };
+}
+
+function findAccountIndex(store, accountId) {
+  if (typeof accountId !== "string" || accountId.length === 0) return -1;
+  const needle = accountId.trim();
+  const lowered = needle.toLowerCase();
+  return store.accounts.findIndex((account) =>
+    publicAccountId(account) === needle
+    || accountKeyOf(account) === needle
+    || (typeof account.email === "string" && account.email.toLowerCase() === lowered));
+}
+
+function activeAccountFrom(store) {
+  if (store.accounts.length === 0) return undefined;
+  const index = findAccountIndex(store, store.activeAccountId);
+  return store.accounts[index >= 0 ? index : 0];
+}
+
+function upsertAccount(store, creds, activate = true) {
+  const next = cloneAccount(creds);
+  const accounts = [];
+  let replaced = false;
+  for (const account of store.accounts) {
+    if (sameAccount(account, next)) {
+      accounts.push(next);
+      replaced = true;
+    } else accounts.push(cloneAccount(account));
+  }
+  if (!replaced) accounts.push(next);
+  const activeId = activate === false && store.activeAccountId !== undefined
+    ? store.activeAccountId
+    : publicAccountId(next) ?? store.activeAccountId;
+  return {
+    version: CREDENTIAL_VERSION,
+    ...(activeId !== undefined ? { activeAccountId: activeId } : {}),
+    accounts,
+  };
+}
+
+function switchActiveAccount(store, accountId) {
+  const index = findAccountIndex(store, accountId);
+  if (index < 0) return undefined;
+  const id = publicAccountId(store.accounts[index]);
+  return {
+    version: CREDENTIAL_VERSION,
+    ...(id !== undefined ? { activeAccountId: id } : {}),
+    accounts: store.accounts.map(cloneAccount),
+  };
+}
+
+function removeAccount(store, accountId) {
+  const index = findAccountIndex(store, accountId);
+  if (index < 0) {
+    return store.accounts.length === 0 ? emptyStore() : {
+      version: CREDENTIAL_VERSION,
+      ...(store.activeAccountId !== undefined ? { activeAccountId: store.activeAccountId } : {}),
+      accounts: store.accounts.map(cloneAccount),
+    };
+  }
+  const accounts = store.accounts.filter((_, at) => at !== index).map(cloneAccount);
+  if (accounts.length === 0) return emptyStore();
+  const removedWasActive = findAccountIndex(store, store.activeAccountId) === index || store.activeAccountId === undefined;
+  const nextActive = removedWasActive ? publicAccountId(accounts[0]) : store.activeAccountId;
+  return {
+    version: CREDENTIAL_VERSION,
+    ...(nextActive !== undefined ? { activeAccountId: nextActive } : {}),
+    accounts,
+  };
+}
+
+function decodeCredentialStore(raw) {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
+  // v2：accounts 数组。
+  if (Array.isArray(raw.accounts)) {
+    const accounts = [];
+    for (const entry of raw.accounts) {
+      if (!isAccountRecord(entry)) return undefined;
+      accounts.push(cloneAccount(entry));
+    }
+    const activeAccountId = typeof raw.activeAccountId === "string" && raw.activeAccountId.length > 0
+      ? raw.activeAccountId
+      : undefined;
+    const store = { version: CREDENTIAL_VERSION, accounts };
+    if (activeAccountId !== undefined) store.activeAccountId = activeAccountId;
+    const active = activeAccountFrom(store);
+    if (active !== undefined) {
+      const id = publicAccountId(active);
+      if (id !== undefined) store.activeAccountId = id;
+    } else delete store.activeAccountId;
+    return store;
+  }
+  // v1 单账号（{ access, refresh, expires, projectId?, email? }）→ 迁移。
+  if (!isAccountRecord(raw)) return undefined;
+  return storeFromLegacy(raw);
+}
+
+async function readCredentialStore() {
+  let parsed;
+  try {
+    parsed = JSON.parse(await readFile(credentialPath(), "utf8"));
+  } catch {
+    return emptyStore();
+  }
+  const store = decodeCredentialStore(parsed);
+  if (store === undefined) return emptyStore();
+  // v1 → v2 迁移后立即落盘，保证后续写入都是新结构。
+  if (!Array.isArray(parsed.accounts)) {
+    await writeCredentialStore(store).catch(() => {});
+  }
+  return store;
+}
+
+async function writeCredentialStore(store) {
   await mkdir(dirname(credentialPath()), { recursive: true });
+  const body = JSON.stringify({
+    version: CREDENTIAL_VERSION,
+    ...(store.activeAccountId !== undefined ? { activeAccountId: store.activeAccountId } : {}),
+    accounts: store.accounts.map(cloneAccount),
+  }, null, 2);
   const tmp = `${credentialPath()}.${process.pid}.tmp`;
-  await writeFile(tmp, JSON.stringify(creds, null, 2), { mode: 0o600 });
+  await writeFile(tmp, body, { mode: 0o600 });
   await chmod(tmp, 0o600);
   await rename(tmp, credentialPath());
 }
@@ -313,11 +479,13 @@ async function loadCodeAssistProject(fetchImpl, endpoint, access) {
 
 // 项目按端点配对：daily 给 consumer 项目（aicode-consumers），主端点给个人
 // 项目（cloudaicompanionProject）。用错项目 = 400/429。
+// 多账号后缓存按账号隔离（不同账号的 consumer/个人项目线不同）。
 const PROJECT_CACHE_TTL_MS = 30 * 60 * 1000;
-const projectCache = new Map(); // endpoint -> { projectId, expiresAt }
+const projectCache = new Map(); // `${accountId}\n${endpoint}` -> { projectId, expiresAt }
 
-async function projectForEndpoint(fetchImpl, endpoint, access, fallback) {
-  const cached = projectCache.get(endpoint);
+async function projectForEndpoint(fetchImpl, endpoint, access, fallback, accountId) {
+  const cacheKey = accountId === undefined ? endpoint : `${accountId}\n${endpoint}`;
+  const cached = projectCache.get(cacheKey);
   if (cached !== undefined && cached.expiresAt > Date.now()) return cached.projectId;
   let projectId;
   try {
@@ -325,7 +493,7 @@ async function projectForEndpoint(fetchImpl, endpoint, access, fallback) {
   } catch {
     projectId = undefined;
   }
-  projectCache.set(endpoint, { projectId, expiresAt: Date.now() + PROJECT_CACHE_TTL_MS });
+  projectCache.set(cacheKey, { projectId, expiresAt: Date.now() + PROJECT_CACHE_TTL_MS });
   return projectId ?? fallback;
 }
 
@@ -352,6 +520,19 @@ async function refreshCredential(fetchImpl, creds) {
     refresh: typeof tokens.refresh_token === "string" ? tokens.refresh_token : creds.refresh,
     expires: Date.now() + tokens.expires_in * 1000 - 300_000,
   };
+}
+
+// 刷新结果区分「IdP 明确拒绝」与「网络不可达」：网络失败保留旧凭据以便
+// 下次重试（对齐 grok 的 ensureFresh*：网络抖动不把用户踢下线）。
+async function tryRefreshCredential(fetchImpl, creds) {
+  try {
+    const refreshed = await refreshCredential(fetchImpl, creds);
+    return { ok: true, creds: refreshed };
+  } catch (error) {
+    const text = error instanceof Error ? error.message : String(error);
+    const network = !/token(\s|%)?交换失败 HTTP (?:400|401|403)|invalid_grant|invalid_request/i.test(text);
+    return { ok: false, network, error };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -493,7 +674,7 @@ async function buildContents(options, attachments, signal, model) {
       else if (block.type === "tool-result") results.push(block);
       else if (block.type === "image") {
         if (!attachments || typeof attachments.readImage !== "function") {
-          throw new LlmError("Gemini (Antigravity) — 图片输入需要 attachment 服务", "UNSUPPORTED_CONTENT");
+          throw new LlmError("Gemini OAuth — 图片输入需要 attachment 服务", "UNSUPPORTED_CONTENT");
         }
         const stored = await attachments.readImage(block.attachment, signal);
         const mimeType = stored?.ref?.mediaType ?? block.attachment?.mediaType ?? "image/png";
@@ -626,12 +807,15 @@ const GATED_ENDPOINT_HINT = "cloudcode-pa.googleapis.com 仅限企业/GCP 许可
 
 // loadCodeAssist 的个人/企业标记：个人账号绑定 daily 端点（详见上面注释）。
 // 缓存 30 分钟；探测失败按个人账号保守处理（仅 daily，不影响主流用户）。
+// 多账号后缓存按账号隔离。
 const ACCOUNT_PROFILE_TTL_MS = 30 * 60 * 1000;
-let accountProfileCache = undefined; // { gcpManaged, expiresAt }
+const accountProfileCache = new Map(); // accountId -> { gcpManaged, expiresAt }
 
-async function resolveAccountProfile(fetchImpl, access) {
-  if (accountProfileCache !== undefined && accountProfileCache.expiresAt > Date.now()) {
-    return accountProfileCache.gcpManaged;
+async function resolveAccountProfile(fetchImpl, access, accountId) {
+  const key = accountId === undefined ? "" : accountId;
+  const cached = accountProfileCache.get(key);
+  if (cached !== undefined && cached.expiresAt > Date.now()) {
+    return cached.gcpManaged;
   }
   let gcpManaged = false;
   try {
@@ -640,7 +824,7 @@ async function resolveAccountProfile(fetchImpl, access) {
     });
     if (r.ok && isJsonRecord(r.json)) gcpManaged = r.json.gcpManaged === true;
   } catch { /* 探测失败按个人账号保守处理 */ }
-  accountProfileCache = { gcpManaged, expiresAt: Date.now() + ACCOUNT_PROFILE_TTL_MS };
+  accountProfileCache.set(key, { gcpManaged, expiresAt: Date.now() + ACCOUNT_PROFILE_TTL_MS });
   return gcpManaged;
 }
 
@@ -666,7 +850,7 @@ async function egressDiagnostic(fetchImpl) {
 function sleepMs(ms, signal) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
-      reject(new LlmError("Gemini (Antigravity) 请求已取消", "ABORTED"));
+      reject(new LlmError("Gemini OAuth 请求已取消", "ABORTED"));
       return;
     }
     const timer = setTimeout(() => {
@@ -675,23 +859,24 @@ function sleepMs(ms, signal) {
     }, ms);
     const onAbort = () => {
       clearTimeout(timer);
-      reject(new LlmError("Gemini (Antigravity) 请求已取消", "ABORTED"));
+      reject(new LlmError("Gemini OAuth 请求已取消", "ABORTED"));
     };
     signal?.addEventListener("abort", onAbort, { once: true });
   });
 }
 
 async function* streamChunks(fetchImpl, options, model, creds, attachments) {
+  const accountId = publicAccountId(creds);
   // 个人账号只走 daily（官方 agy 行为；cloudcode-pa 对个人账号恒 429）。
-  const gcpManaged = await resolveAccountProfile(fetchImpl, creds.access);
+  const gcpManaged = await resolveAccountProfile(fetchImpl, creds.access, accountId);
   const endpoints = gcpManaged ? ENDPOINTS : [ENDPOINTS[0]];
   let lastStatus;
   let lastErrorText = "";
   const endpointErrors = [];
   for (const endpoint of endpoints) {
-    if (options.signal?.aborted) throw new LlmError("Gemini (Antigravity) 请求已取消", "ABORTED");
+    if (options.signal?.aborted) throw new LlmError("Gemini OAuth 请求已取消", "ABORTED");
     // 每个端点配对各自项目（daily→consumer 项目；主端点→个人项目）。
-    const projectId = await projectForEndpoint(fetchImpl, endpoint, creds.access, creds.projectId);
+    const projectId = await projectForEndpoint(fetchImpl, endpoint, creds.access, creds.projectId, accountId);
     const body = JSON.stringify(await buildRequest(options, model, projectId, creds.access, attachments, options.signal));
     const attribution = attributionHeaders();
     const { "user-agent": attributionUa, ...attributionRest } = attribution;
@@ -749,7 +934,7 @@ async function* streamChunks(fetchImpl, options, model, creds, attachments) {
   const gatedIssue = !gcpManaged && /cloudcode-pa\.googleapis\.com.*429/i.test(combined);
   const diag = (locationIssue || quotaIssue) && !gatedIssue ? await egressDiagnostic(fetchImpl) : undefined;
   throw new LlmError(
-    `Gemini (Antigravity) 请求失败：${combined || `HTTP ${lastStatus ?? "?"}`}` +
+    `Gemini OAuth 请求失败：${combined || `HTTP ${lastStatus ?? "?"}`}` +
       `${gatedIssue ? `\n${GATED_ENDPOINT_HINT}` : ""}${locationIssue ? `\n${LOCATION_HINT}` : ""}` +
       `${diag ? `\n[出口诊断] 当前代理出口 ${diag.ip}${diag.country ? `（${diag.country}${diag.city ? ` ${diag.city}` : ""}` : ""}${diag.org ? ` / ${diag.org}` : ""}${diag.country ? "）" : ""}` : ""}`,
     code,
@@ -786,7 +971,7 @@ function classifyError(message) {
 }
 
 async function* consumeSse(response, model) {
-  if (response.body === null) throw new LlmError("Gemini (Antigravity) 返回了空的响应流", "TRANSPORT");
+  if (response.body === null) throw new LlmError("Gemini OAuth 返回了空的响应流", "TRANSPORT");
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -875,7 +1060,7 @@ async function* consumeSse(response, model) {
       if (chunk === undefined) continue;
       if (isJsonRecord(chunk.error)) {
         const message = typeof chunk.error.message === "string" ? chunk.error.message : JSON.stringify(chunk.error);
-        throw new LlmError(`Gemini (Antigravity) 服务端错误：${message}`, classifyError(message));
+        throw new LlmError(`Gemini OAuth 服务端错误：${message}`, classifyError(message));
       }
       for (const emitted of consume(chunk)) yield emitted;
     }
@@ -883,7 +1068,7 @@ async function* consumeSse(response, model) {
   if (buffer.trim().length > 0 && buffer.startsWith("data:")) {
     for (const emitted of consume(safeJson(buffer.slice(5).trim()) ?? {})) yield emitted;
   }
-  if (!hasContent) throw new LlmError("Gemini (Antigravity) 返回了空响应", "EMPTY_RESPONSE");
+  if (!hasContent) throw new LlmError("Gemini OAuth 返回了空响应", "EMPTY_RESPONSE");
   const finishOut = [];
   closeCurrent(finishOut);
   for (const emitted of finishOut) yield emitted;
@@ -892,7 +1077,7 @@ async function* consumeSse(response, model) {
   if (hasToolCall) reason = { kind: "tool-calls" };
   else if (rawFinishReason === "MAX_TOKENS") reason = { kind: "max-tokens" };
   else if (rawFinishReason === "STOP" || rawFinishReason === undefined) reason = { kind: "stop" };
-  else reason = { kind: "error", failure: { message: `Gemini (Antigravity) 结束原因：${rawFinishReason}`, code: "GEMINI_OAUTH_FINISH_REASON" } };
+  else reason = { kind: "error", failure: { message: `Gemini OAuth 结束原因：${rawFinishReason}`, code: "GEMINI_OAUTH_FINISH_REASON" } };
 
   if (usage !== undefined) {
     const cacheRead = Number(usage.cachedContentTokenCount) || 0;
@@ -992,8 +1177,9 @@ async function fetchQuota(fetchImpl, creds) {
 }
 
 async function fetchCatalog(fetchImpl, creds) {
+  const accountId = publicAccountId(creds);
   for (const endpoint of ENDPOINTS) {
-    const projectId = await projectForEndpoint(fetchImpl, endpoint, creds.access, creds.projectId);
+    const projectId = await projectForEndpoint(fetchImpl, endpoint, creds.access, creds.projectId, accountId);
     const r = await postJson(fetchImpl, endpoint, "/v1internal:fetchAvailableModels", creds.access, { project: projectId });
     if (r.ok && r.json && isJsonRecord(r.json.models)) return catalogFromLive(r.json.models);
   }
@@ -1019,21 +1205,49 @@ export function apply(ctx, config) {
       this.fetch = fetchImpl;
     }
 
-    async ensureAccess(signal) {
-      let creds = await readCredentialStore();
-      if (!creds) {
-        throw new LlmError("Gemini (Antigravity) 未登录 —— 请到「设置 → Gemini (Antigravity)」完成 Google 登录", "AUTH");
+    async ensureAccess(signal, accountId) {
+      let store = await readCredentialStore();
+      let account;
+      if (accountId === undefined) {
+        account = activeAccountFrom(store);
+      } else {
+        const index = findAccountIndex(store, accountId);
+        account = index >= 0 ? store.accounts[index] : undefined;
       }
-      if (creds.expires < Date.now() + 300_000) {
-        creds = await refreshCredential(this.fetch, creds);
-        await writeCredentialStore(creds).catch(() => {});
+      if (account === undefined) {
+        throw new LlmError("Gemini OAuth 未登录 —— 请到「设置 → Gemini OAuth」完成 Google 登录", "AUTH");
       }
-      if (typeof creds.projectId !== "string" || creds.projectId.length === 0) {
-        creds = { ...creds, projectId: await discoverProject(this.fetch, creds.access) ?? stableProjectId(creds.email || "gemini-oauth-default") };
-        await writeCredentialStore(creds).catch(() => {});
+      if (account.expires < Date.now() + 300_000) {
+        const refreshed = await tryRefreshCredential(this.fetch, account);
+        if (refreshed.ok) {
+          account = refreshed.creds;
+          store = upsertAccount(store, account, false);
+          await writeCredentialStore(store).catch(() => {});
+        } else if (refreshed.network === false) {
+          // IdP 明确拒绝（invalid_grant 等）：该账号 refresh token 已失效，移除。
+          const targetId = publicAccountId(account) ?? accountId;
+          if (targetId !== undefined) {
+            const next = removeAccount(store, targetId);
+            if (next.accounts.length === 0) await deleteCredentialStore().catch(() => {});
+            else await writeCredentialStore(next).catch(() => {});
+          }
+          throw new LlmError("Gemini OAuth 登录已失效，请重新登录该账号", "AUTH");
+        }
+        // 网络失败：保留旧凭据继续尝试（错误会透传到请求本身）。
       }
-      if (signal?.aborted) throw new LlmError("Gemini (Antigravity) 请求已取消", "ABORTED");
-      return creds;
+      if (typeof account.projectId !== "string" || account.projectId.length === 0) {
+        const projectId = await discoverProject(this.fetch, account.access)
+          ?? stableProjectId(account.email || publicAccountId(account) || "gemini-oauth-default");
+        account = { ...account, projectId };
+        store = upsertAccount(store, account, false);
+        await writeCredentialStore(store).catch(() => {});
+      }
+      if (signal?.aborted) throw new LlmError("Gemini OAuth 请求已取消", "ABORTED");
+      return account;
+    }
+
+    resetCatalogCache() {
+      this.catalogCache = undefined;
     }
 
     async catalog(signal) {
@@ -1042,12 +1256,10 @@ export function apply(ctx, config) {
       }
       let list = STATIC_CATALOG;
       try {
-        const creds = await readCredentialStore();
-        if (creds && creds.access && creds.projectId) {
-          list = await fetchCatalog(this.fetch, creds);
-        }
+        const creds = await this.ensureAccess(signal);
+        list = await fetchCatalog(this.fetch, creds);
       } catch {
-        // 在线校正失败时保留静态目录（advisory）。
+        // 未登录 / 在线校正失败时保留静态目录（advisory）。
       }
       this.catalogCache = { list, expiresAt: Date.now() + MODEL_CACHE_TTL_MS };
       return list;
@@ -1140,7 +1352,12 @@ export function apply(ctx, config) {
       const result = await handler(req, ac.signal);
       if (ac.signal.aborted) return;
       if (!result.ok) {
-        sendJson(res, 200, { ok: false, error: result.error?.message ?? "请求失败" });
+        // error 可能是 Error 对象或字符串：统一提取 message（历史版本只认
+        // Error.message，导致「该账号不存在」这类字符串错误被降级成「请求失败」）。
+        const message = result.error instanceof Error
+          ? result.error.message
+          : (typeof result.error === "string" && result.error.length > 0 ? result.error : "请求失败");
+        sendJson(res, 200, { ok: false, error: message });
         return;
       }
       sendJson(res, 200, { ok: true, value: result.value });
@@ -1161,8 +1378,11 @@ export function apply(ctx, config) {
       const disposers = [
         webServer.register({ kind: "exact", path: `${API_PATH}/status`, handler: apiHandler("GET", (_req, signal) => routeStatus(signal)) }, "dsh-gemini-oauth/status"),
         webServer.register({ kind: "exact", path: `${API_PATH}/login`, handler: apiHandler("POST", () => routeLogin()) }, "dsh-gemini-oauth/login"),
-        webServer.register({ kind: "exact", path: `${API_PATH}/logout`, handler: apiHandler("POST", () => routeLogout()) }, "dsh-gemini-oauth/logout"),
-        webServer.register({ kind: "exact", path: `${API_PATH}/quota`, handler: apiHandler("POST", (_req, signal) => routeQuota(signal)) }, "dsh-gemini-oauth/quota"),
+        webServer.register({ kind: "exact", path: `${API_PATH}/logout`, handler: apiHandler("POST", (req, signal) => routeRemoveAccount(req, signal)) }, "dsh-gemini-oauth/logout"),
+        webServer.register({ kind: "exact", path: `${API_PATH}/switch`, handler: apiHandler("POST", (req, signal) => routeSwitchAccount(req, signal)) }, "dsh-gemini-oauth/switch"),
+        webServer.register({ kind: "exact", path: `${API_PATH}/remove`, handler: apiHandler("POST", (req, signal) => routeRemoveAccount(req, signal)) }, "dsh-gemini-oauth/remove"),
+        webServer.register({ kind: "exact", path: `${API_PATH}/quota`, handler: apiHandler("POST", (req, signal) => routeQuota(req, signal)) }, "dsh-gemini-oauth/quota"),
+        webServer.register({ kind: "exact", path: `${API_PATH}/quota-all`, handler: apiHandler("POST", (_req, signal) => routeQuotaAll(signal)) }, "dsh-gemini-oauth/quota-all"),
         webServer.register({
           kind: "exact",
           path: `${API_PATH}/models`,
@@ -1188,20 +1408,61 @@ export function apply(ctx, config) {
     });
   });
 
+  // 账号视图（secret-free）：给设置页展示与切换/移除后的状态回执。
+  const accountView = (account, active) => ({
+    id: publicAccountId(account) ?? "",
+    ...(typeof account.email === "string" ? { email: account.email } : {}),
+    expires: account.expires,
+    active: active === true,
+  });
+
+  const statusView = (store) => {
+    const active = activeAccountFrom(store);
+    if (active === undefined) return { authenticated: false, accounts: [] };
+    const activeId = publicAccountId(active);
+    return {
+      authenticated: true,
+      ...(typeof active.email === "string" ? { email: active.email } : {}),
+      ...(typeof active.tierName === "string" ? { tierName: active.tierName } : {}),
+      ...(activeId !== undefined ? { activeAccountId: activeId } : {}),
+      accounts: store.accounts.map((account) => accountView(account, publicAccountId(account) === activeId)),
+    };
+  };
+
+  // 无 token 的错误信息消毒：确保 access/refresh 永不出现于回执。
+  const redactSecrets = (message, ...accounts) => {
+    let out = message;
+    for (const account of accounts) {
+      for (const secret of [account?.access, account?.refresh]) {
+        if (typeof secret === "string" && secret.length > 0) out = out.split(secret).join("[redacted]");
+      }
+    }
+    return out;
+  };
+
   const routeStatus = async (signal) => {
-    const creds = await readCredentialStore();
+    const store = await readCredentialStore();
     const login = loginSession === undefined
       ? undefined
       : { status: loginSession.status, ...(loginSession.error ? { error: loginSession.error } : {}) };
-    if (!creds) return { ok: true, value: { authenticated: false, login } };
-    const value = { authenticated: true, login, email: creds.email, tierName: creds.tierName };
-    if (value.email === undefined) {
+    const value = statusView(store);
+    if (login !== undefined) value.login = login;
+    // 老凭据可能没存 email：用 userinfo 补齐一次并写回。
+    const active = activeAccountFrom(store);
+    if (active !== undefined && typeof active.email !== "string") {
       try {
         const r = await runtime.fetch("https://www.googleapis.com/oauth2/v1/userinfo?alt=json", {
-          headers: { authorization: `Bearer ${creds.access}` },
+          headers: { authorization: `Bearer ${active.access}` },
           signal,
         });
-        if (r.ok) value.email = (await r.json()).email ?? undefined;
+        if (r.ok) {
+          const email = (await r.json()).email;
+          if (typeof email === "string") {
+            const next = upsertAccount(store, { ...active, email }, false);
+            await writeCredentialStore(next).catch(() => {});
+            value.email = email;
+          }
+        }
       } catch { /* 静默 */ }
     }
     return { ok: true, value };
@@ -1234,7 +1495,7 @@ export function apply(ctx, config) {
         return;
       }
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" })
-        .end("<html><body><h2>Gemini (Antigravity) 登录完成</h2>可以关闭此页。</body></html>");
+        .end("<html><body><h2>Gemini OAuth 登录完成</h2>可以关闭此页。</body></html>");
       resolveCallback(code);
     });
     await new Promise((resolve, reject) => {
@@ -1277,13 +1538,15 @@ export function apply(ctx, config) {
           } catch { /* 静默 */ }
           const projectId = await discoverProject(runtime.fetch, tokens.access_token)
             ?? stableProjectId(email || "gemini-oauth-default");
-          await writeCredentialStore({
+          const store = await readCredentialStore();
+          await writeCredentialStore(upsertAccount(store, {
             access: tokens.access_token,
             refresh: tokens.refresh_token,
             expires: Date.now() + tokens.expires_in * 1000 - 300_000,
             projectId,
             email,
-          });
+          }));
+          runtime.resetCatalogCache(); // 新账号成为 active：清旧账号的模型目录缓存
           loginSession.status = "complete";
         } catch (error) {
           loginSession.status = "error";
@@ -1300,18 +1563,127 @@ export function apply(ctx, config) {
     return { ok: true, value: { authUrl } };
   };
 
-  const routeLogout = async () => {
-    await deleteCredentialStore();
-    return { ok: true, value: { authenticated: false } };
+  // 移除账号（logout / remove 共用）：不传 accountId = 移除 active 账号；
+  // 移除 active 后自动落到剩余的第一个账号。
+  const routeRemoveAccount = async (req, signal) => {
+    let accountId;
+    try {
+      const raw = await readBody(req, signal);
+      const payload = raw.trim().length > 0 ? JSON.parse(raw) : undefined;
+      accountId = payload && typeof payload.accountId === "string" ? payload.accountId : undefined;
+    } catch {
+      return { ok: false, error: "请求体不是合法 JSON" };
+    }
+    const store = await readCredentialStore();
+    let targetId = accountId;
+    if (targetId === undefined) {
+      const active = activeAccountFrom(store);
+      targetId = active === undefined ? undefined : publicAccountId(active);
+    }
+    if (targetId === undefined) {
+      await deleteCredentialStore();
+      runtime.resetCatalogCache();
+      return { ok: true, value: statusView(emptyStore()) };
+    }
+    const next = removeAccount(store, targetId);
+    if (next.accounts.length === 0) await deleteCredentialStore();
+    else await writeCredentialStore(next);
+    runtime.resetCatalogCache();
+    return { ok: true, value: statusView(next) };
   };
 
-  const routeQuota = async (signal) => {
-    const creds = await runtime.ensureAccess(signal);
-    const quota = await fetchQuota(runtime.fetch, {
-      access: creds.access,
-      projectId: creds.projectId,
-    });
-    return { ok: true, value: { quota: quota ?? null, fetchedAt: new Date().toISOString() } };
+  const routeSwitchAccount = async (req, signal) => {
+    const raw = await readBody(req, signal);
+    let payload;
+    try { payload = JSON.parse(raw); } catch { return { ok: false, error: "请求体不是合法 JSON" }; }
+    const accountId = payload?.accountId;
+    if (typeof accountId !== "string" || accountId.length === 0) {
+      return { ok: false, error: "accountId 必填" };
+    }
+    const store = await readCredentialStore();
+    const switched = switchActiveAccount(store, accountId);
+    if (switched === undefined) return { ok: false, error: "该账号不存在于本机" };
+    await writeCredentialStore(switched);
+    runtime.resetCatalogCache();
+    const status = statusView(switched);
+    // 老凭据可能没存 email：用 userinfo 补齐一次并写回。
+    const active = activeAccountFrom(switched);
+    if (active !== undefined && typeof active.email !== "string") {
+      try {
+        const r = await runtime.fetch("https://www.googleapis.com/oauth2/v1/userinfo?alt=json", {
+          headers: { authorization: `Bearer ${active.access}` },
+          signal,
+        });
+        if (r.ok) {
+          const email = (await r.json()).email;
+          if (typeof email === "string") {
+            const next = upsertAccount(switched, { ...active, email }, false);
+            await writeCredentialStore(next).catch(() => {});
+            status.email = email;
+          }
+        }
+      } catch { /* 静默 */ }
+    }
+    return { ok: true, value: status };
+  };
+
+  const routeQuota = async (req, signal) => {
+    let accountId;
+    try {
+      const raw = await readBody(req, signal);
+      const payload = raw.trim().length > 0 ? JSON.parse(raw) : undefined;
+      accountId = payload && typeof payload.accountId === "string" ? payload.accountId : undefined;
+    } catch {
+      return { ok: false, error: "请求体不是合法 JSON" };
+    }
+    const creds = await runtime.ensureAccess(signal, accountId);
+    const quota = await fetchQuota(runtime.fetch, creds);
+    return {
+      ok: true,
+      value: {
+        quota: quota ?? null,
+        fetchedAt: new Date().toISOString(),
+        accountId: publicAccountId(creds),
+      },
+    };
+  };
+
+  // 每个已保存账号的额度摘要（不切换 active）：设置页账号列表用。
+  const routeQuotaAll = async (signal) => {
+    let store = await readCredentialStore();
+    if (store.accounts.length === 0) return { ok: true, value: { accounts: [], fetchedAt: new Date().toISOString() } };
+    const activeId = (() => {
+      const active = activeAccountFrom(store);
+      return active === undefined ? undefined : publicAccountId(active);
+    })();
+    const results = [];
+    for (const account of store.accounts) {
+      const id = publicAccountId(account) ?? "";
+      const base = {
+        accountId: id,
+        ...(typeof account.email === "string" ? { email: account.email } : {}),
+        active: id === activeId,
+      };
+      let current = account;
+      if (current.expires < Date.now() + 300_000) {
+        const refreshed = await tryRefreshCredential(runtime.fetch, current);
+        if (refreshed.ok) {
+          current = refreshed.creds;
+          store = upsertAccount(store, current, false);
+          await writeCredentialStore(store).catch(() => {});
+        }
+        // 拒绝/网络失败：仍用旧 token 尝试，read 失败按 error 上报。
+      }
+      try {
+        const quota = await fetchQuota(runtime.fetch, current);
+        results.push({ ...base, status: "ok", quota: quota ?? null });
+      } catch (error) {
+        const message = error instanceof Error && error.message.length > 0 ? error.message : "额度读取失败";
+        results.push({ ...base, status: "error", message: redactSecrets(message, account, current) });
+      }
+      if (signal?.aborted) break;
+    }
+    return { ok: true, value: { accounts: results, fetchedAt: new Date().toISOString() } };
   };
 
   // 模型白名单：GET 返回全目录 + 每项 enabled 标记；POST 覆盖启用列表。
@@ -1393,4 +1765,23 @@ export function apply(ctx, config) {
   });
 }
 
-export { Config, readModelConfig, writeModelConfig, resetModelConfig };
+export {
+  Config,
+  readModelConfig,
+  writeModelConfig,
+  resetModelConfig,
+  // 多账号 store 工具（debug / smoke 测试用）。
+  decodeCredentialStore,
+  storeFromLegacy,
+  upsertAccount,
+  switchActiveAccount,
+  removeAccount,
+  accountKeyOf,
+  publicAccountId,
+  activeAccountFrom,
+  findAccountIndex,
+  emptyStore,
+  readCredentialStore,
+  writeCredentialStore,
+  deleteCredentialStore,
+};

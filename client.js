@@ -1,4 +1,4 @@
-// dsh-gemini-oauth 客户端：设置 → Gemini (Antigravity) 登录卡。
+// dsh-gemini-oauth 客户端：设置 → Gemini OAuth 登录卡。
 // 结构参照 LiZhenNet/dsh-antigravity 的 settings client（MIT），已精简：
 // 保留账号、登录/退出/刷新与额度展示；模型清单由模型选择器直接消费。
 window.__ModuleLoader__.load({
@@ -10,17 +10,27 @@ window.__ModuleLoader__.load({
     const STYLE_ID = "dsh-gemini-oauth-settings-style";
     const API = "/gemini-oauth/api";
     const NS = "dsh-gemini-oauth";
-    const ANTIGRAVITY_SVG_PATH =
-      "M89.6992 93.695C94.3659 97.195 101.366 94.8617 94.9492 88.445C75.6992 69.7783 79.7825 18.445 55.8659 18.445C31.9492 18.445 36.0325 69.7783 16.7825 88.445C9.78251 95.445 17.3658 97.195 22.0325 93.695C40.1159 81.445 38.9492 59.8617 55.8659 59.8617C72.7825 59.8617 71.6159 81.445 89.6992 93.695Z";
+    const GEMINI_SVG_PATH =
+      "M12 2c-.6 5-4 8.5-9 9 5 .5 8.4 4 9 9 .6-5 4-8.5 9-9-5-.5-8.4-4-9-9Z";
 
     const zh = {
-      pageDesc: "登录 Google Antigravity / Cloud Code Assist，用订阅额度直接使用 Gemini（及账号下的 Claude / GPT-OSS）。",
+      pageDesc: "使用 Google 账号登录 OAuth，用订阅额度直接使用 Gemini（及账号下的其他模型）。",
       currentAccount: "当前账号",
       login: "登录",
       loggingIn: "登录中...",
       refresh: "刷新",
       refreshing: "刷新中...",
       logout: "退出",
+      addAccount: "添加账号",
+      accountActive: "当前使用",
+      switchAccount: "切换",
+      removeAccount: "移除",
+      accountsHelp: "对话与额度使用标「当前使用」的账号；登录新账号后会自动切换到它。",
+      switchFailed: "切换账号失败",
+      removeFailed: "移除账号失败",
+      accountSwitched: "已切换到 {email}",
+      quotaFailed: "额度读取失败",
+      quotaRemaining: "{val}% 剩余",
       loading: "加载中...",
       notSignedIn: "未登录",
       notSignedInDesc: "点击登录后会在浏览器中完成 Google OAuth；登录成功后这里会显示额度。",
@@ -36,7 +46,7 @@ window.__ModuleLoader__.load({
       updatedAt: "更新时间：{time}",
       loginFailed: "登录失败",
       modelSelector: "模型选择",
-      modelSelectorDesc: "勾选后会出现在模型选择器里的 Gemini (Antigravity) 模型。",
+      modelSelectorDesc: "勾选后会出现在模型选择器里的 Gemini 模型。",
       selectAll: "全选",
       unselectAll: "全不选",
       loadingModels: "正在加载模型...",
@@ -54,13 +64,23 @@ window.__ModuleLoader__.load({
     };
 
     const en = {
-      pageDesc: "Sign in to Google Antigravity / Cloud Code Assist to use Gemini with your subscription quota.",
+      pageDesc: "Sign in with Google OAuth to use Gemini with your subscription quota.",
       currentAccount: "Current Account",
       login: "Sign in",
       loggingIn: "Signing in...",
       refresh: "Refresh",
       refreshing: "Refreshing...",
       logout: "Sign out",
+      addAccount: "Add account",
+      accountActive: "Active",
+      switchAccount: "Use",
+      removeAccount: "Remove",
+      accountsHelp: "Chats and quota use the account marked Active; newly signed-in accounts become active automatically.",
+      switchFailed: "Failed to switch account",
+      removeFailed: "Failed to remove account",
+      accountSwitched: "Switched to {email}",
+      quotaFailed: "Quota unavailable",
+      quotaRemaining: "{val}% left",
       loading: "Loading...",
       notSignedIn: "Not signed in",
       notSignedInDesc: "Click Sign in to complete Google OAuth in your browser. Quotas will appear here after login.",
@@ -76,7 +96,7 @@ window.__ModuleLoader__.load({
       updatedAt: "Updated at: {time}",
       loginFailed: "Login failed",
       modelSelector: "Model Selection",
-      modelSelectorDesc: "Checked models will appear in the Gemini (Antigravity) model picker.",
+      modelSelectorDesc: "Checked models will appear in the Gemini model picker.",
       selectAll: "Select all",
       unselectAll: "Deselect all",
       loadingModels: "Loading models...",
@@ -139,6 +159,16 @@ window.__ModuleLoader__.load({
 .dgo-btn-primary{border-color:#111827;background:#111827;color:white}
 .dgo-btn-primary:hover{background:#272d38}
 .dgo-account{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;padding:12px;border:1px solid #eef1f5;border-radius:10px;background:#fafbfc;color:#4b5563}
+.dgo-account-list{display:flex;flex-direction:column;gap:8px;margin-bottom:14px}
+.dgo-account-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid #eef1f5;border-radius:10px;background:#fafbfc;color:#4b5563}
+.dgo-account-main{display:flex;flex-direction:column;gap:5px;min-width:0;flex:1 1 auto}
+.dgo-account-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:16px}
+.dgo-active-badge{display:inline-flex;align-items:center;font-size:12px;line-height:16px;font-weight:650;color:#059669;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:999px;padding:1px 8px}
+.dgo-account-caption{font-size:12px;line-height:16px;color:#8b93a1}
+.dgo-account-caption-error{color:#dc2626}
+.dgo-account-actions{display:flex;gap:6px;flex:none;flex-wrap:wrap;justify-content:flex-end}
+.dgo-accounts-help{margin-top:10px;color:#8b93a1;font-size:12px;line-height:18px}
+.dgo-accounts-empty{border:1px dashed #d8dee8;border-radius:10px;padding:14px;color:#747f90;background:#fafbfc;font-size:13px;line-height:20px}
 .dgo-email{display:flex;align-items:center;gap:9px;font-size:14px;font-weight:650;min-width:0}
 .dgo-email-mark{width:16px;height:12px;border:1.8px solid #7f8a9a;border-radius:3px;position:relative;flex:0 0 auto}
 .dgo-email-mark:before{content:"";position:absolute;left:1px;right:1px;top:1px;height:7px;border-bottom:1.8px solid #7f8a9a;transform:skewY(-28deg)}
@@ -223,11 +253,11 @@ window.__ModuleLoader__.load({
       return body.value;
     }
 
-    function AntigravityIcon({ size = 20, className = "" }) {
+    function GeminiIcon({ size = 20, className = "" }) {
       return React.createElement(
         "svg",
         {
-          viewBox: "0 0 110 113",
+          viewBox: "0 0 24 24",
           width: size,
           height: size,
           fill: "none",
@@ -237,7 +267,7 @@ window.__ModuleLoader__.load({
           "aria-hidden": "true",
         },
         React.createElement("path", {
-          d: ANTIGRAVITY_SVG_PATH,
+          d: GEMINI_SVG_PATH,
           fill: "currentColor",
         }),
       );
@@ -288,8 +318,10 @@ window.__ModuleLoader__.load({
 
       const [status, setStatus] = useState({ loading: true });
       const [quota, setQuota] = useState(undefined);
+      const [quotaAll, setQuotaAll] = useState(undefined);
       const [busy, setBusy] = useState(false);
       const [error, setError] = useState("");
+      const [notice, setNotice] = useState("");
       const pollRef = useRef(undefined);
 
       const [models, setModels] = useState(undefined);
@@ -364,6 +396,17 @@ window.__ModuleLoader__.load({
         return value;
       }, []);
 
+      // 每个已保存账号的额度摘要：老 host 没有 /quota-all 路由（404）时静默跳过。
+      const refreshQuotaAll = useCallback(async () => {
+        try {
+          const value = await api("/quota-all", { method: "POST" });
+          setQuotaAll(value);
+          return value;
+        } catch {
+          return undefined;
+        }
+      }, []);
+
       const saveModels = useCallback(async (enabledModelIds) => {
         setModelBusy(true);
         setError("");
@@ -386,14 +429,16 @@ window.__ModuleLoader__.load({
         try {
           const value = await api("/quota", { method: "POST" });
           setQuota(value);
+          publishQuota(value);
           await refreshStatus();
           await refreshModels();
+          await refreshQuotaAll();
         } catch (err) {
           setError(err instanceof Error ? err.message : String(err));
         } finally {
           setBusy(false);
         }
-      }, [refreshStatus, refreshModels]);
+      }, [refreshStatus, refreshModels, refreshQuotaAll]);
 
       useEffect(() => {
         installStyle();
@@ -456,12 +501,52 @@ window.__ModuleLoader__.load({
           const value = await api("/logout", { method: "POST" });
           setStatus({ loading: false, ...value });
           setQuota(undefined);
+          setQuotaAll(undefined);
+          if (value.authenticated) await refreshQuota();
         } catch (err) {
           setError(err instanceof Error ? err.message : String(err));
         } finally {
           setBusy(false);
         }
-      }, []);
+      }, [refreshQuota]);
+
+      const switchAccount = useCallback(async (accountId) => {
+        setBusy(true);
+        setError("");
+        try {
+          const value = await api("/switch", {
+            method: "POST",
+            body: JSON.stringify({ accountId }),
+          });
+          setStatus({ loading: false, ...value });
+          setQuota(undefined);
+          setNotice(tr("accountSwitched", { email: value.email || accountId }));
+          await refreshQuota();
+        } catch (err) {
+          setError(`${tr("switchFailed")}：${err instanceof Error ? err.message : String(err)}`);
+        } finally {
+          setBusy(false);
+        }
+      }, [refreshQuota, tr]);
+
+      const removeAccount = useCallback(async (accountId) => {
+        setBusy(true);
+        setError("");
+        try {
+          const value = await api("/remove", {
+            method: "POST",
+            body: JSON.stringify({ accountId }),
+          });
+          setStatus({ loading: false, ...value });
+          setQuota(undefined);
+          setQuotaAll(undefined);
+          if (value.authenticated) await refreshQuota();
+        } catch (err) {
+          setError(`${tr("removeFailed")}：${err instanceof Error ? err.message : String(err)}`);
+        } finally {
+          setBusy(false);
+        }
+      }, [refreshQuota, tr]);
 
       const quotaGroups = useMemo(() => {
         if (!quota || !quota.quota) return [];
@@ -473,7 +558,25 @@ window.__ModuleLoader__.load({
         })).filter((group) => group.buckets.length > 0);
       }, [quota]);
 
-      const email = status.email || (status.loading ? tr("loading") : tr("notSignedIn"));
+      const accountList = Array.isArray(status.accounts) && status.accounts.length > 0
+        ? status.accounts
+        : (status.authenticated
+            ? [{ id: status.activeAccountId ?? status.email ?? "active", email: status.email, active: true }]
+            : []);
+
+      const quotaEntryOf = (accountId) => {
+        if (!quotaAll || !Array.isArray(quotaAll.accounts)) return undefined;
+        return quotaAll.accounts.find((entry) => entry.accountId === accountId || entry.email === accountId);
+      };
+
+      const accountCaptionOf = (entry) => {
+        if (entry === undefined) return undefined;
+        if (entry.status === "error") return { text: `${tr("quotaFailed")}：${entry.message ?? ""}`, error: true };
+        if (entry.status !== "ok" || !entry.quota) return undefined;
+        const parsed = parseQuota(entry.quota);
+        const val = parsed.geminiWeek ?? parsed.gemini5h ?? parsed.claudeWeek ?? parsed.claude5h;
+        return val === null ? undefined : { text: tr("quotaRemaining", { val }), error: false };
+      };
 
       // 模型勾选：已启用在前，Gemini → Claude → GPT 家族排序，同族版本从新到旧。
       const familyOrder = (option) => {
@@ -525,28 +628,46 @@ window.__ModuleLoader__.load({
 
       return React.createElement("div", { className: "dgo-wrap" },
         React.createElement("div", { className: "dgo-page-head" },
-          React.createElement(AntigravityIcon, { size: 24, className: "dgo-brand-icon" }),
-          React.createElement("h2", { className: "dgo-page-title" }, "Gemini (Antigravity)"),
+          React.createElement(GeminiIcon, { size: 24, className: "dgo-brand-icon" }),
+          React.createElement("h2", { className: "dgo-page-title" }, "Gemini OAuth 登录"),
         ),
         React.createElement("p", { className: "dgo-page-desc" }, tr("pageDesc")),
         React.createElement("section", { className: "dgo-card" },
           React.createElement("div", { className: "dgo-head" },
             React.createElement("div", { className: "dgo-title" },
-              React.createElement(AntigravityIcon, { size: 18, className: "dgo-brand-icon" }),
+              React.createElement(GeminiIcon, { size: 18, className: "dgo-brand-icon" }),
               React.createElement("span", null, tr("currentAccount")),
             ),
             React.createElement("div", { className: "dgo-actions" },
               !status.authenticated && React.createElement("button", { className: "dgo-btn dgo-btn-primary", disabled: busy, onClick: startLogin }, busy ? tr("loggingIn") : tr("login")),
               status.authenticated && React.createElement("button", { className: "dgo-btn dgo-btn-primary", disabled: busy, onClick: refreshQuota }, busy ? tr("refreshing") : tr("refresh")),
-              status.authenticated && React.createElement("button", { className: "dgo-btn", disabled: busy, onClick: logout }, tr("logout")),
+              status.authenticated && React.createElement("button", { className: "dgo-btn", disabled: busy, onClick: () => void startLogin() }, busy ? tr("loggingIn") : tr("addAccount")),
             ),
           ),
-          React.createElement("div", { className: "dgo-account" },
-            React.createElement("div", { className: "dgo-email" },
-              React.createElement("span", { className: "dgo-email-mark", "aria-hidden": "true" }),
-              React.createElement("span", { className: "dgo-email-text" }, email),
-            ),
-          ),
+          !status.authenticated
+            ? React.createElement("div", { className: "dgo-accounts-empty" }, tr("notSignedInDesc"))
+            : React.createElement("div", { className: "dgo-account-list" },
+                accountList.map((account) => {
+                  const caption = accountCaptionOf(quotaEntryOf(account.id));
+                  return React.createElement("div", { className: "dgo-account-row", key: account.id },
+                    React.createElement("div", { className: "dgo-account-main" },
+                      React.createElement("div", { className: "dgo-email" },
+                        React.createElement("span", { className: "dgo-email-mark", "aria-hidden": "true" }),
+                        React.createElement("span", { className: "dgo-email-text" }, account.email || account.id),
+                      ),
+                      React.createElement("div", { className: "dgo-account-meta" },
+                        account.active && React.createElement("span", { className: "dgo-active-badge" }, tr("accountActive")),
+                        caption && React.createElement("span", { className: `dgo-account-caption${caption.error ? " dgo-account-caption-error" : ""}` }, caption.text),
+                      ),
+                    ),
+                    React.createElement("div", { className: "dgo-account-actions" },
+                      !account.active && React.createElement("button", { className: "dgo-btn", disabled: busy, onClick: () => void switchAccount(account.id) }, tr("switchAccount")),
+                      React.createElement("button", { className: "dgo-btn", disabled: busy, onClick: () => void removeAccount(account.id) }, tr("removeAccount")),
+                    ),
+                  );
+                }),
+                React.createElement("div", { className: "dgo-accounts-help" }, tr("accountsHelp")),
+              ),
           !status.authenticated && React.createElement("div", { className: "dgo-empty" }, tr("notSignedInDesc")),
           status.authenticated && !quota && React.createElement("div", { className: "dgo-empty" }, busy ? tr("fetchingQuota") : tr("noQuotaDesc")),
           status.authenticated && quotaGroups.length > 0 && React.createElement("div", { className: "dgo-quota-title" }, tr("quota")),
@@ -566,6 +687,7 @@ window.__ModuleLoader__.load({
             );
           }),
           error && React.createElement("div", { className: "dgo-error" }, error),
+          notice && React.createElement("div", { className: "dgo-note" }, notice),
           quota && React.createElement("div", { className: "dgo-note" },
             tr("updatedAt", { time: new Date(quota.fetchedAt).toLocaleString() }),
           ),
@@ -646,6 +768,13 @@ window.__ModuleLoader__.load({
     let quotaPollTimer = undefined;
     let isPolling = false;
 
+    // 设置页刷新/切换账号后同步给聊天 dock 的额度芯片（模块级共享状态）。
+    function publishQuota(value) {
+      if (!value || !value.quota) return;
+      sharedQuota = value.quota;
+      for (const fn of quotaListeners) fn(sharedQuota);
+    }
+
     async function pollQuota(force = false) {
       if (!force && (typeof document !== "undefined" && (document.hidden || !document.hasFocus()))) return;
       if (isPolling) return;
@@ -715,7 +844,7 @@ window.__ModuleLoader__.load({
       const displayText = isDanger ? `周告急 (${displayVal}%)` : `${displayVal}% 剩余`;
 
       return React.createElement("div", { className: `dgo-chip ${isDanger ? "dgo-chip-danger" : ""}` },
-        React.createElement(AntigravityIcon, { size: 14, className: "dgo-chip-icon" }),
+        React.createElement(GeminiIcon, { size: 14, className: "dgo-chip-icon" }),
         React.createElement("span", null, displayText),
         React.createElement("div", { className: "dgo-tooltip" },
           React.createElement("div", { className: "dgo-tt-title" }, "Gemini 额度详情"),
@@ -750,14 +879,15 @@ window.__ModuleLoader__.load({
           name: "settings.section",
           id: "gemini-oauth",
           order: 13,
-          label: () => "Gemini (Antigravity)",
+          label: () => "Gemini OAuth 登录",
+          icon: React.createElement(GeminiIcon, { size: 14 }),
         }, (props) => React.createElement(GeminiSettings, { ...props, ctx })));
 
         ctx.slots.inject("conversation.composer.dock", () => ctx.slots.register({
           name: "conversation.composer.dock",
           id: "dsh-gemini-oauth-usage-dock",
           order: -90,
-          label: () => "Gemini (Antigravity)",
+          label: () => "Gemini OAuth",
         }, (props) => React.createElement(GeminiUsageChip, props)));
       },
     };
