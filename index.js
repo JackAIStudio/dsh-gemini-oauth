@@ -610,13 +610,58 @@ function sanitizeToolCallId(raw, fallbackName) {
   return id.length <= 256 ? id : id.slice(0, 256);
 }
 
-// 端点回退策略：401/402 等确定性非法请求直接失败；其余（含 400）都尝试
-// 下一个端点——daily 偶发 Google 侧瞬时校验失败（«User location is not
-// supported» 属出口 IP 风控瞬时判定，主端点与重试可能成功），不能一 400
-// 就放弃（历史版本在此 break，导致「重启后重发就好」的假象）。
+// 端点策略（对齐官方 agy 客户端行为，CLIProxyAPI #5209 反汇编 + 24 账号实测）：
+//   - 个人账号（gcpManaged=false，即 Free/Pro/Ultra/Google One 订阅）
+//     严格只用 daily-cloudcode-pa，官方客户端从不跨端点回退；
+//     而 cloudcode-pa 对个人账号恒 429（Google 将其 gating 给企业/GCP 许可），
+//     回退只会把「daily 偶发瞬时失败」放大成排山倒海的双重报错（冷却级联假象）。
+//   - 企业账号（gcpManaged=true）才允许在 daily 失败后回退 cloudcode-pa。
+// 瞬时判定重试：400 «User location is not supported» 与 429 都是 Google 侧
+// 短暂窗口（几十秒到几分钟自愈；出口为机房/托管 IP 时更容易触发），在
+// 本端点退避重试，不轻易放弃（历史版本在此 break，导致「重启后重发就好」的假象）。
 const LOCATION_RETRY_PATTERN = /location is not supported/i;
-const LOCATION_RETRY_DELAY_MS = 1500;
-const LOCATION_HINT = "请确认出口 IP 在受支持地区：插件设置卡「网络」填代理（如 127.0.0.1:7897），且代理节点出口为 美/日/新加坡 等地区（大陆与部分机房 IP 会被 Google 拒绝）";
+const TRANSIENT_BACKOFF_MS = [0, 2000, 6000, 14000];
+const LOCATION_HINT = "出口 IP 风控判定（Google 按出口 IP 的 国家/ASN/机房特征 间歇性拒绝；支持国家 ≠ 该路径接受当前 IP）。建议：插件设置卡「网络」使用代理（127.0.0.1:7897），节点优先选 家宽/原生/住宅 线路，避开 G-Core/IDC 机房 IP";
+const GATED_ENDPOINT_HINT = "cloudcode-pa.googleapis.com 仅限企业/GCP 许可账号（个人订阅账号访问恒为 429，已按官方客户端策略不再回退该端点）";
+
+// loadCodeAssist 的个人/企业标记：个人账号绑定 daily 端点（详见上面注释）。
+// 缓存 30 分钟；探测失败按个人账号保守处理（仅 daily，不影响主流用户）。
+const ACCOUNT_PROFILE_TTL_MS = 30 * 60 * 1000;
+let accountProfileCache = undefined; // { gcpManaged, expiresAt }
+
+async function resolveAccountProfile(fetchImpl, access) {
+  if (accountProfileCache !== undefined && accountProfileCache.expiresAt > Date.now()) {
+    return accountProfileCache.gcpManaged;
+  }
+  let gcpManaged = false;
+  try {
+    const r = await postJson(fetchImpl, ENDPOINTS[0], "/v1internal:loadCodeAssist", access, {
+      metadata: { ideType: "ANTIGRAVITY", platform: "PLATFORM_UNSPECIFIED", pluginType: "GEMINI" },
+    });
+    if (r.ok && isJsonRecord(r.json)) gcpManaged = r.json.gcpManaged === true;
+  } catch { /* 探测失败按个人账号保守处理 */ }
+  accountProfileCache = { gcpManaged, expiresAt: Date.now() + ACCOUNT_PROFILE_TTL_MS };
+  return gcpManaged;
+}
+
+// 失败路径上的出口诊断：用同一代理 dispatcher 查出口 IP/ASN，让用户一眼
+// 看出节点是不是机房 IP（G-Core/IDC 等），而不是猜「代理是不是生效了」。
+async function egressDiagnostic(fetchImpl) {
+  try {
+    const r = await fetchImpl("https://ipinfo.io/json", { signal: AbortSignal.timeout(4000) });
+    if (!r.ok) return undefined;
+    const j = await r.json();
+    if (!isJsonRecord(j) || typeof j.ip !== "string") return undefined;
+    return {
+      ip: j.ip,
+      country: typeof j.country === "string" ? j.country : undefined,
+      city: typeof j.city === "string" ? j.city : undefined,
+      org: typeof j.org === "string" ? j.org : undefined,
+    };
+  } catch {
+    return undefined;
+  }
+}
 
 function sleepMs(ms, signal) {
   return new Promise((resolve, reject) => {
@@ -637,10 +682,13 @@ function sleepMs(ms, signal) {
 }
 
 async function* streamChunks(fetchImpl, options, model, creds, attachments) {
+  // 个人账号只走 daily（官方 agy 行为；cloudcode-pa 对个人账号恒 429）。
+  const gcpManaged = await resolveAccountProfile(fetchImpl, creds.access);
+  const endpoints = gcpManaged ? ENDPOINTS : [ENDPOINTS[0]];
   let lastStatus;
   let lastErrorText = "";
   const endpointErrors = [];
-  for (const endpoint of ENDPOINTS) {
+  for (const endpoint of endpoints) {
     if (options.signal?.aborted) throw new LlmError("Gemini (Antigravity) 请求已取消", "ABORTED");
     // 每个端点配对各自项目（daily→consumer 项目；主端点→个人项目）。
     const projectId = await projectForEndpoint(fetchImpl, endpoint, creds.access, creds.projectId);
@@ -670,11 +718,16 @@ async function* streamChunks(fetchImpl, options, model, creds, attachments) {
       return { ok: response.ok, status: response.status, text, response };
     };
     let { ok, status, text, response } = await sendOnce();
-    // Google 侧「User location is not supported」被观察到是偶发瞬时判定
-    // （出口 IP 风控 / 账号供给漂移），同端点短延迟重试一次再进入回退。
-    if (!ok && status === 400 && LOCATION_RETRY_PATTERN.test(text)) {
-      await sleepMs(LOCATION_RETRY_DELAY_MS, options.signal);
-      ({ ok, status, text, response } = await sendOnce());
+    // 瞬时判定退避重试：400 location / 429 多在几十秒内自愈（出口 IP 风控
+    // 漂移、并发瞬时限流），同端点退避重试比跨端点接力更接近官方客户端行为。
+    if (!ok && (status === 429 || (status === 400 && LOCATION_RETRY_PATTERN.test(text)))) {
+      for (const delay of TRANSIENT_BACKOFF_MS.slice(1)) {
+        await sleepMs(delay, options.signal);
+        ({ ok, status, text, response } = await sendOnce());
+        if (ok) break;
+        // 重试途中退化成其它失败类型：交给下方统一分类，不再消耗退避窗口。
+        if (!(status === 429 || (status === 400 && LOCATION_RETRY_PATTERN.test(text)))) break;
+      }
     }
     lastStatus = status;
     if (ok) {
@@ -690,8 +743,15 @@ async function* streamChunks(fetchImpl, options, model, creds, attachments) {
   const combined = endpointErrors.join("；");
   const code = classifyError(combined);
   const locationIssue = LOCATION_RETRY_PATTERN.test(combined);
+  const quotaIssue = /\b429\b|quota|exhausted/i.test(combined);
+  // 失败归因：默认只走 daily，若仍出现 gated 端点 429 说明端点 gating，
+  // 别再让用户查配额/换节点（配额桶根本没满）。
+  const gatedIssue = !gcpManaged && /cloudcode-pa\.googleapis\.com.*429/i.test(combined);
+  const diag = (locationIssue || quotaIssue) && !gatedIssue ? await egressDiagnostic(fetchImpl) : undefined;
   throw new LlmError(
-    `Gemini (Antigravity) 请求失败：${combined || `HTTP ${lastStatus ?? "?"}`}${locationIssue ? `\n${LOCATION_HINT}` : ""}`,
+    `Gemini (Antigravity) 请求失败：${combined || `HTTP ${lastStatus ?? "?"}`}` +
+      `${gatedIssue ? `\n${GATED_ENDPOINT_HINT}` : ""}${locationIssue ? `\n${LOCATION_HINT}` : ""}` +
+      `${diag ? `\n[出口诊断] 当前代理出口 ${diag.ip}${diag.country ? `（${diag.country}${diag.city ? ` ${diag.city}` : ""}` : ""}${diag.org ? ` / ${diag.org}` : ""}${diag.country ? "）" : ""}` : ""}`,
     code,
   );
 }
@@ -1111,6 +1171,14 @@ export function apply(ctx, config) {
             POST: (req, signal) => routeModelsSave(req, signal),
           }),
         }, "dsh-gemini-oauth/models"),
+        webServer.register({
+          kind: "exact",
+          path: `${API_PATH}/settings`,
+          handler: apiHandler({
+            GET: () => routeSettings(),
+            POST: (req, signal) => routeSettingsSave(req, signal),
+          }),
+        }, "dsh-gemini-oauth/settings"),
       ];
       return () => {
         for (const dispose of disposers) {
@@ -1275,6 +1343,39 @@ export function apply(ctx, config) {
     }
     const enabled = await runtime.setEnabledModels(payload.enabledModelIds);
     return { ok: true, value: await modelsView(signal, enabled) };
+  };
+
+  // 设置卡「网络」区：proxy 读写走 dsh-settings，保存成功后 host 侧
+  // applyTransport 的 onChange 会被触发，无需重启即可换代理。
+  const settingsView = (settings) => {
+    const descriptor = settings.describe().find((entry) => entry.ns === NS);
+    const value = descriptor?.value;
+    return {
+      proxy: typeof value?.proxy === "string" ? value.proxy : "",
+      revision: descriptor?.revision ?? 0,
+    };
+  };
+
+  const routeSettings = async () => {
+    const settings = ctx.get("settings");
+    if (settings === undefined) return { ok: true, value: { proxy: "", revision: 0 } };
+    return { ok: true, value: settingsView(settings) };
+  };
+
+  const routeSettingsSave = async (req, signal) => {
+    const settings = ctx.get("settings");
+    if (settings === undefined) return { ok: false, error: "设置服务不可用" };
+    const raw = await readBody(req, signal);
+    let payload;
+    try { payload = JSON.parse(raw); } catch { return { ok: false, error: "请求体不是合法 JSON" }; }
+    const proxy = payload?.proxy;
+    if (typeof proxy !== "string") return { ok: false, error: "proxy 必须是字符串" };
+    const before = settingsView(settings);
+    const ops = [];
+    if (before.proxy !== proxy) ops.push({ op: "set", path: ["proxy"], value: proxy });
+    const expectedRevision = typeof payload?.expectedRevision === "number" ? payload.expectedRevision : undefined;
+    if (ops.length > 0) await settings.mutate(NS, ops, expectedRevision);
+    return { ok: true, value: settingsView(settings) };
   };
 
   installSettingsSection(ctx, NS, Config, config, {

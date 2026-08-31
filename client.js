@@ -41,6 +41,16 @@ window.__ModuleLoader__.load({
       unselectAll: "全不选",
       loadingModels: "正在加载模型...",
       modelSelectorNote: "勾选即自动保存，持久化在本机。重新打开模型选择器（或新开会话）后生效；运行中的旧会话不受影响。",
+      network: "网络",
+      netDesc: "仅 Gemini 流量的 HTTP 代理（登录 + 对话），其他模型不受影响。",
+      proxyLabel: "HTTP 代理（仅 Gemini 流量）",
+      proxyPlaceholder: "如 127.0.0.1:7897（留空 = 跟随环境变量）",
+      proxyHelp: "只有 accounts.google.com / oauth2.googleapis.com（登录）与 cloudcode-pa.googleapis.com（对话）的请求走此代理；DeepSeek 等其他模型保持直连不受影响。留空 = 跟随环境变量 HTTPS_PROXY / ALL_PROXY；没有环境变量时直连。本机代理没导出到环境变量（如 Clash TUN 模式）请填 127.0.0.1:7897；填 direct 强制直连。保存后立即生效。",
+      proxySaved: "已保存，立即生效。",
+      proxySaveFailed: "保存失败",
+      proxySave: "保存",
+      proxySaving: "保存中...",
+      netNeedsRestart: "dsh web 宿主端还是旧版本：请重启 dsh web 后再使用这里的网络设置。",
     };
 
     const en = {
@@ -71,6 +81,16 @@ window.__ModuleLoader__.load({
       unselectAll: "Deselect all",
       loadingModels: "Loading models...",
       modelSelectorNote: "Saved automatically and persisted locally. Reopen the model picker (or start a new session) to see the change; running sessions are unaffected.",
+      network: "Network",
+      netDesc: "HTTP proxy for Gemini traffic only (sign-in + chat); other models are unaffected.",
+      proxyLabel: "HTTP proxy (Gemini traffic only)",
+      proxyPlaceholder: "e.g. 127.0.0.1:7897 (leave empty to follow the environment)",
+      proxyHelp: "Only accounts.google.com / oauth2.googleapis.com (sign-in) and cloudcode-pa.googleapis.com (chat) requests use this proxy; other models like DeepSeek stay on the direct connection. Empty = use HTTPS_PROXY / ALL_PROXY from the environment; with no such variables the plugin connects directly. If your local proxy is not exported to the environment (e.g. Clash TUN mode), enter 127.0.0.1:7897. Enter direct to force a direct connection. Applies immediately after saving.",
+      proxySaved: "Saved. Applied immediately.",
+      proxySaveFailed: "Save failed",
+      proxySave: "Save",
+      proxySaving: "Saving...",
+      netNeedsRestart: "The dsh web host is still running the old plugin code: restart dsh web before using the network settings here.",
     };
 
     function createTranslator(ctx) {
@@ -141,6 +161,22 @@ window.__ModuleLoader__.load({
 .dgo-error{margin-top:12px;color:#991b1b;background:#fff5f5;border:1px solid #fecaca;border-radius:10px;padding:10px 12px;font-size:13px;white-space:pre-wrap}
 .dgo-note{margin-top:12px;color:#8b93a1;font-size:12px;line-height:18px}
 .dgo-model-card{margin-top:14px}
+.dgo-net-card{margin-top:14px}
+.dgo-net-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
+.dgo-net-title{font-size:14px;font-weight:700;color:#111827}
+.dgo-net-desc{margin-top:3px;color:#8b93a1;font-size:12px;line-height:18px}
+.dgo-net-label{display:block;margin-bottom:6px;color:#4b5563;font-size:13px;font-weight:650}
+.dgo-net-input{box-sizing:border-box;width:100%;padding:8px 12px;border:1px solid #d7dce3;border-radius:10px;font-size:13px;line-height:20px;color:#111827;background:#fff;outline:none}
+.dgo-net-input:focus{border-color:#111827}
+.dgo-net-help{margin-top:8px;color:#8b93a1;font-size:12px;line-height:18px}
+.dgo-net-actions{margin-top:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.dgo-net-btn{border:1px solid #d7dce3;background:#fff;color:#111827;border-radius:10px;padding:7px 14px;font-size:13px;line-height:18px;cursor:pointer}
+.dgo-net-btn:hover{background:#f7f8fa}
+.dgo-net-btn:disabled{cursor:not-allowed;opacity:.55}
+.dgo-net-btn-primary{border-color:#111827;background:#111827;color:white}
+.dgo-net-btn-primary:hover{background:#272d38}
+.dgo-net-status{margin-top:10px;color:#059669;font-size:12px;line-height:18px}
+.dgo-net-status-error{margin-top:10px;color:#991b1b;background:#fff5f5;border:1px solid #fecaca;border-radius:10px;padding:10px 12px;font-size:12px;line-height:18px;white-space:pre-wrap}
 .dgo-model-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px}
 .dgo-model-title{font-size:14px;font-weight:700;color:#111827}
 .dgo-model-desc{margin-top:3px;color:#8b93a1;font-size:12px;line-height:18px}
@@ -162,7 +198,7 @@ window.__ModuleLoader__.load({
 .dgo-chip-danger{color:#dc2626}
 .dgo-chip-danger:hover{opacity:0.8}
 .dgo-chip-icon{width:14px;height:14px;color:inherit;flex-shrink:0}
-.dgo-tooltip{position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);background:#111827;color:#fff;padding:10px 12px;border-radius:8px;font-size:12px;line-height:18px;white-space:nowrap;pointer-events:none;opacity:0;transition:opacity 0.15s;z-index:100;box-shadow:0 4px 12px rgba(0,0,0,0.15)}
+.dgo-tooltip{position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);background:#111827;color:#fff;padding:10px 12px;border-radius:8px;font-size:12px;line-height:18px;white-space:nowrap;pointer-events:none;opacity:0;transition:opacity 0.15s;z-index:99999;box-shadow:0 4px 12px rgba(0,0,0,0.15)}
 .dgo-chip:hover .dgo-tooltip{opacity:1}
 .dgo-tooltip::after{content:"";position:absolute;top:100%;left:50%;transform:translateX(-50%);border-width:5px;border-style:solid;border-color:#111827 transparent transparent transparent}
 .dgo-tt-title{font-weight:600;margin-bottom:6px;color:#e5e7eb}
@@ -259,6 +295,63 @@ window.__ModuleLoader__.load({
       const [models, setModels] = useState(undefined);
       const [modelBusy, setModelBusy] = useState(false);
 
+      // 网络区：proxy 读写。host 侧保存到 dsh-settings 后 applyTransport
+      // 立即重建 fetch，因此这里保存后无需提示重启。
+      const [netProxy, setNetProxy] = useState("");
+      const [netBusy, setNetBusy] = useState(false);
+      const [netStatus, setNetStatus] = useState(undefined); // { ok: true } | { ok: false, error }
+      const [netLoaded, setNetLoaded] = useState(false);
+      const [netSupported, setNetSupported] = useState(true);
+
+      const netFetch = useCallback(async (path, options) => {
+        const response = await fetch(`${API}${path}`, {
+          ...options,
+          headers: {
+            "content-type": "application/json",
+            ...(options && options.headers ? options.headers : {}),
+          },
+        });
+        // 旧版 host 没有 /settings 路由（HTTP 404）：网络区降级为只读提示。
+        if (response.status === 404) throw { __netHostStale: true };
+        const body = await response.json().catch(() => ({ ok: false, error: "invalid-json" }));
+        if (!response.ok || !body.ok) throw new Error(body.error || `HTTP ${response.status}`);
+        return body.value;
+      }, []);
+
+      const refreshNet = useCallback(async () => {
+        try {
+          const value = await netFetch("/settings");
+          setNetProxy(value && typeof value.proxy === "string" ? value.proxy : "");
+          setNetSupported(true);
+        } catch (err) {
+          if (err && err.__netHostStale) setNetSupported(false);
+        } finally {
+          setNetLoaded(true);
+        }
+      }, [netFetch]);
+
+      const saveNet = useCallback(async () => {
+        setNetBusy(true);
+        setNetStatus(undefined);
+        try {
+          const value = await netFetch("/settings", {
+            method: "POST",
+            body: JSON.stringify({ proxy: netProxy }),
+          });
+          setNetProxy(value && typeof value.proxy === "string" ? value.proxy : "");
+          setNetStatus({ ok: true });
+        } catch (err) {
+          if (err && err.__netHostStale) {
+            // host 侧尚未加载新版代码：提示重启而不是报一串 404。
+            setNetStatus({ ok: false, error: tr("netNeedsRestart") });
+          } else {
+            setNetStatus({ ok: false, error: `${tr("proxySaveFailed")}：${err instanceof Error ? err.message : String(err)}` });
+          }
+        } finally {
+          setNetBusy(false);
+        }
+      }, [netProxy, netFetch, tr]);
+
       const refreshStatus = useCallback(async () => {
         const value = await api("/status");
         setStatus({ loading: false, ...value });
@@ -318,11 +411,12 @@ window.__ModuleLoader__.load({
               setError(err instanceof Error ? err.message : String(err));
             }
           });
+        void refreshNet();
         return () => {
           cancelled = true;
           if (pollRef.current !== undefined) window.clearInterval(pollRef.current);
         };
-      }, [refreshQuota, refreshStatus, refreshModels]);
+      }, [refreshQuota, refreshStatus, refreshModels, refreshNet]);
 
       const startLogin = useCallback(async () => {
         setBusy(true);
@@ -505,6 +599,44 @@ window.__ModuleLoader__.load({
                 )),
               ),
           React.createElement("div", { className: "dgo-note" }, tr("modelSelectorNote")),
+        ),
+        React.createElement("section", { className: "dgo-card dgo-net-card" },
+          React.createElement("div", { className: "dgo-net-head" },
+            React.createElement("div", null,
+              React.createElement("div", { className: "dgo-net-title" }, tr("network")),
+              React.createElement("div", { className: "dgo-net-desc" }, tr("netDesc")),
+            ),
+          ),
+          !netLoaded
+            ? React.createElement("div", { className: "dgo-empty" }, tr("loading"))
+            : React.createElement("label", { htmlFor: "dgo-net-proxy", style: { display: "block" } },
+                React.createElement("span", { className: "dgo-net-label" }, tr("proxyLabel")),
+                React.createElement("input", {
+                  id: "dgo-net-proxy",
+                  className: "dgo-net-input",
+                  type: "text",
+                  value: netProxy,
+                  autoComplete: "off",
+                  spellCheck: false,
+                  placeholder: tr("proxyPlaceholder"),
+                  disabled: netBusy || !netSupported,
+                  onChange: (event) => {
+                    setNetProxy(event.target.value);
+                    setNetStatus(undefined);
+                  },
+                }),
+              ),
+          React.createElement("p", { className: "dgo-net-help" }, tr("proxyHelp")),
+          !netSupported && React.createElement("div", { className: "dgo-net-status-error" }, tr("netNeedsRestart")),
+          netSupported && React.createElement("div", { className: "dgo-net-actions" },
+            React.createElement("button", {
+              className: "dgo-net-btn dgo-net-btn-primary",
+              disabled: netBusy || !netLoaded,
+              onClick: () => void saveNet(),
+            }, netBusy ? tr("proxySaving") : tr("proxySave")),
+          ),
+          netStatus && netStatus.ok && React.createElement("div", { className: "dgo-net-status" }, tr("proxySaved")),
+          netStatus && !netStatus.ok && React.createElement("div", { className: "dgo-net-status-error" }, netStatus.error),
         ),
       );
     }
