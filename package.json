@@ -40,6 +40,20 @@
     "node": "^22.19.0 || >=24.0.0"
   },
   "license": "MIT",
+  "scripts": {
+    "build": "node scripts/build.js",
+    "watch": "node scripts/build.js --watch",
+    "dev": "node scripts/build.js --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import ./test-loader.mjs test-store.mjs && node --import ./test-loader.mjs test-routes.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.0.0"
+  },
   "dependencies": {
     "undici": "^7.0.0"
   },

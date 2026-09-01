@@ -55,11 +55,28 @@ host 插件要重启 `dsh web` 才加载新的 `index.js`。
 - **图片输入报「需要 attachment 服务」**：附件服务是惰性解析的，首次请求即接入 `ctx.attachments`；若持续报错请确认 dsh web 已重启。
 - **工具调用后 400 "missing a thought_signature"**：工具闭环要求回传 `functionCall` 的 `thought_signature`（同一 provider+model 才有效）。插件会在流式输出时把签名存进块上并在下一轮回传；若自定义封装绕过了 DSH 的消息组装请确保保留了块上的 `thoughtSignature` 字段。
 
-## 目录结构
+## 目录结构与开发
 
-- `index.js` —— host 侧：OAuth/PKCE + LlmAdapter + 额度 + HTTP API + cordis 装配。
-- `client.js` —— 客户端设置卡（登录 / 额度 / 模型白名单）。
-- `cordis.patch.yml` —— 注册 `llm-gemini-oauth` loader 行。
+- `src/` —— 模块化源码（TypeScript / React TSX）：
+  - `src/common/` —— 共享常量与类型契约
+  - `src/host/` —— 宿主端模块（OAuth/PKCE、CCA通信、模型目录、请求组装、SSE流解析、LlmAdapter、API路由等）
+  - `src/client/` —— 前端设置页组件与对话框 Dock 额度芯片
+- `scripts/build.js` —— 基于 esbuild 的快速构建脚本
+- `index.js` —— [构建产物] host 插件入口
+- `client.js` —— [构建产物] Web 客户端组件入口
+- `cordis.patch.yml` —— 注册 `llm-gemini-oauth` loader 配置
+
+```bash
+# 开发监听模式
+pnpm run dev
+
+# 打包构建
+pnpm run build
+
+# 类型检查与测试
+pnpm run typecheck
+pnpm test
+```
 
 ## 上游来源与许可
 
