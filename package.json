@@ -1,6 +1,6 @@
 {
   "name": "dsh-gemini-oauth",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "独立、本机持有的 Gemini provider —— 通过 Google Antigravity / Cloud Code Assist 订阅 OAuth (PKCE) 登录，不碰 console API key。可视为 dsh-grok-oauth 的 Gemini 对应物。v0.2 支持多账号保存/切换/移除。",
   "type": "module",
