@@ -336,7 +336,14 @@ export function registerApiRoutes(ctx: any, runtime: GemOAuthRuntime, ns: any): 
         webServer.register({ kind: "exact", path: `${API_PATH}/logout`, handler: apiHandler("POST", (req, signal) => routeRemoveAccount(req, signal)) }, "dsh-gemini-oauth/logout"),
         webServer.register({ kind: "exact", path: `${API_PATH}/switch`, handler: apiHandler("POST", (req, signal) => routeSwitchAccount(req, signal)) }, "dsh-gemini-oauth/switch"),
         webServer.register({ kind: "exact", path: `${API_PATH}/remove`, handler: apiHandler("POST", (req, signal) => routeRemoveAccount(req, signal)) }, "dsh-gemini-oauth/remove"),
-        webServer.register({ kind: "exact", path: `${API_PATH}/quota`, handler: apiHandler("POST", (req, signal) => routeQuota(req, signal)) }, "dsh-gemini-oauth/quota"),
+        webServer.register({
+          kind: "exact",
+          path: `${API_PATH}/quota`,
+          handler: apiHandler({
+            GET: (req, signal) => routeQuota(req, signal),
+            POST: (req, signal) => routeQuota(req, signal),
+          }),
+        }, "dsh-gemini-oauth/quota"),
         webServer.register({ kind: "exact", path: `${API_PATH}/quota-all`, handler: apiHandler("POST", (_req, signal) => routeQuotaAll(signal)) }, "dsh-gemini-oauth/quota-all"),
         webServer.register({
           kind: "exact",

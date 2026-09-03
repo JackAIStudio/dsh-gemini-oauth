@@ -46,6 +46,7 @@ export function modelDescriptor(
 }
 
 export const STATIC_CATALOG: ModelDescriptor[] = [
+  modelDescriptor("gemini-3.8-flash-tiered", "Gemini 3.8 Flash (Tiered)", "gemini"),
   modelDescriptor("gemini-3.7-flash-tiered", "Gemini 3.7 Flash (Tiered)", "gemini"),
   modelDescriptor("gemini-3.6-flash-high", "Gemini 3.6 Flash (High)", "gemini"),
   modelDescriptor("gemini-3.6-flash-medium", "Gemini 3.6 Flash (Medium)", "gemini"),

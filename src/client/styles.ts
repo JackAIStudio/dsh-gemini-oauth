@@ -1,12 +1,43 @@
 // CSS Styles for Gemini OAuth Settings and Dock
 
 export const STYLE_ID = "dsh-gemini-oauth-settings-style";
+export const GEMINI_NAV_MARKER = "data-dsh-gemini-settings-nav";
+const GEMINI_PATH = "M12 2c-.6 5-4 8.5-9 9 5 .5 8.4 4 9 9 .6-5 4-8.5 9-9-5-.5-8.4-4-9-9Z";
+const GEMINI_MASK_SVG = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='${GEMINI_PATH}' fill='black'/%3E%3C/svg%3E")`;
+
+export const DOCK_CSS = `
+[data-slot="conversation.composer.dock"]:has(> .dgo-usage-dock){display:flex!important;flex-flow:row nowrap;justify-content:center;align-items:center;box-sizing:border-box;width:100%;max-width:var(--dsh-chat-content-width);min-width:0;padding:4px calc(var(--dsh-composer-side-clearance) + 16px) 0;overflow:hidden}
+[data-slot="conversation.composer.dock"]:has(> .dgo-usage-dock)>*{box-sizing:border-box;flex:0 1 auto;min-width:0;width:auto!important;max-width:none!important;margin:0!important;padding:0!important}
+[data-phase="hero"] [data-slot="conversation.input.dock"]:has(> .dgo-usage-dock){display:flex!important;flex:none!important;flex-flow:row nowrap;justify-content:center;align-items:center;box-sizing:border-box;width:100%;max-width:var(--dsh-chat-content-width);min-width:0;min-height:20px;padding:4px calc(var(--dsh-composer-side-clearance) + 16px);overflow:visible;order:30;align-self:center}
+[data-phase="hero"] [data-slot="conversation.input.dock"]:has(> .dgo-usage-dock)>*{box-sizing:border-box;flex:0 1 auto;min-width:0;width:auto!important;max-width:none!important;margin:0!important;padding:0!important}
+.dgo-usage-dock{display:inline-flex;align-items:center;flex:none;line-height:20px}
+[data-slot="conversation.composer.dock"]:has(> .dgo-usage-dock)>.dgo-usage-dock{flex:none;overflow:visible}
+[data-phase="hero"] [data-slot="conversation.input.dock"]:has(> .dgo-usage-dock)>.dgo-usage-dock{flex:none;overflow:visible}
+.dgo-usage-dock:not(:last-child):after{content:"|";color:var(--dsw-alias-separator-primary);margin:0 10px;font-size:12px;line-height:20px}
+.dgo-usage{appearance:none;display:inline-flex;align-items:center;gap:6px;height:20px;padding:0 2px;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-label-tertiary);font:inherit;font-size:12px;line-height:20px;letter-spacing:.01em;white-space:nowrap;cursor:pointer;user-select:none}
+.dgo-usage:hover,.dgo-usage:focus-visible{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary);outline:none}
+.dgo-usage-amount{color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+.dgo-usage.is-warn .dgo-usage-amount{color:var(--dsw-alias-state-warn-primary)}
+.dgo-usage.is-alert .dgo-usage-amount{color:var(--dsw-alias-state-error-primary)}
+.dgo-usage-mark{display:block;opacity:.78;flex:none}
+.dgo-usage:hover .dgo-usage-mark,.dgo-usage:focus-visible .dgo-usage-mark{opacity:.95}
+.dgo-usage.is-loading .dgo-usage-mark{opacity:.95;animation:dgo-usage-spin .8s linear infinite}
+@media (prefers-reduced-motion:reduce){.dgo-usage.is-loading .dgo-usage-mark{animation:none}}
+@keyframes dgo-usage-spin{to{transform:rotate(360deg)}}
+@media (max-width:640px){[data-slot="conversation.composer.dock"]:has(> .dgo-usage-dock),[data-phase="hero"] [data-slot="conversation.input.dock"]:has(> .dgo-usage-dock){padding-left:12px;padding-right:12px}}
+`;
 
 export function installStyle(): void {
-  if (typeof document === "undefined" || document.getElementById(STYLE_ID)) return;
-  const style = document.createElement("style");
-  style.id = STYLE_ID;
+  if (typeof document === "undefined") return;
+  let style = document.getElementById(STYLE_ID) as HTMLStyleElement | null;
+  if (!style) {
+    style = document.createElement("style");
+    style.id = STYLE_ID;
+    document.head.appendChild(style);
+  }
   style.textContent = `
+[${GEMINI_NAV_MARKER}] > svg:first-child{display:none!important}
+[${GEMINI_NAV_MARKER}]::before{content:""!important;flex:none!important;width:16px!important;height:16px!important;background:currentColor!important;-webkit-mask:${GEMINI_MASK_SVG} center / contain no-repeat!important;mask:${GEMINI_MASK_SVG} center / contain no-repeat!important}
 .dgo-wrap{box-sizing:border-box;width:100%;max-width:760px;padding:0 0 24px;color:#111827}
 .dgo-page-head{display:flex;align-items:center;gap:10px}
 .dgo-brand-icon{color:#111827;flex-shrink:0}
@@ -85,18 +116,6 @@ export function installStyle(): void {
 .dgo-model-text{min-width:0;flex:1 1 auto}
 .dgo-model-name{display:block;font-size:13px;font-weight:650;color:#111827;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dgo-model-sub{display:block;margin-top:2px;color:#9aa3b0;font-size:12px;line-height:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.dgo-chip{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:inherit;cursor:default;position:relative;user-select:none;white-space:nowrap;flex:0 0 auto !important;line-height:20px}
-.dgo-chip:not(:last-child)::after{content:"|";color:var(--dsw-alias-separator-primary, rgba(0,0,0,0.2));margin:0 10px;font-size:12px;line-height:20px}
-.dgo-chip:hover{opacity:0.8}
-.dgo-chip-danger{color:#dc2626}
-.dgo-chip-danger:hover{opacity:0.8}
-.dgo-chip-icon{width:14px;height:14px;color:inherit;flex-shrink:0}
-.dgo-tooltip{position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);background:#111827;color:#fff;padding:10px 12px;border-radius:8px;font-size:12px;line-height:18px;white-space:nowrap;pointer-events:none;opacity:0;transition:opacity 0.15s;z-index:99999;box-shadow:0 4px 12px rgba(0,0,0,0.15)}
-.dgo-chip:hover .dgo-tooltip{opacity:1}
-.dgo-tooltip::after{content:"";position:absolute;top:100%;left:50%;transform:translateX(-50%);border-width:5px;border-style:solid;border-color:#111827 transparent transparent transparent}
-.dgo-tt-title{font-weight:600;margin-bottom:6px;color:#e5e7eb}
-.dgo-tt-row{display:flex;justify-content:space-between;gap:16px;margin-top:4px;color:#9ca3af}
-.dgo-tt-val{color:#fff;font-weight:500}
+${DOCK_CSS}
 `;
-  document.head.append(style);
 }

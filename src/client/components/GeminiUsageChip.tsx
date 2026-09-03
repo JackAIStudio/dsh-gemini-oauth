@@ -1,61 +1,124 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import type { QuotaSummary } from "../../common/types";
 import { GeminiIcon } from "./GeminiIcon";
-import { parseQuota, quotaListeners, sharedQuota, startGlobalPolling } from "../quota-state";
+import {
+  formatReset,
+  parseQuota,
+  quotaListeners,
+  sharedQuota,
+  sharedQuotaFetchedAt,
+  sharedQuotaLoading,
+  startGlobalPolling,
+  pollQuota,
+} from "../quota-state";
+import { createTranslator } from "../i18n";
+import type { Translator } from "../types";
 
-export function GeminiUsageChip() {
-  const [quotaData, setQuotaData] = useState<QuotaSummary | null>(sharedQuota);
+export interface GeminiUsageChipProps {
+  seat?: "dock" | "hero";
+  useSession?: any;
+  ctx?: any;
+}
+
+function isBlankComposer(useSession: any): boolean {
+  return typeof useSession === "function" && useSession((s: any) => s?.composerPhase) === "blank";
+}
+
+function buildTooltip(quota: QuotaSummary | null, fetchedAt: string | null, t: Translator): string {
+  if (!quota || !Array.isArray(quota.groups)) return t("quota");
+  const lines: string[] = ["Gemini 额度详情"];
+  for (const group of quota.groups) {
+    if (!group.buckets || group.buckets.length === 0) continue;
+    lines.push(`\n【${group.displayName || "额度"}】`);
+    for (const b of group.buckets) {
+      const pct = Math.max(0, Math.min(100, Math.round((b.remainingFraction ?? 0) * 1000) / 10));
+      const resetStr = b.resetTime ? ` · ${t("resetPrefix", { time: formatReset(b.resetTime, t) })}` : "";
+      lines.push(`${b.displayName || b.bucketId}：${pct}% 剩余${resetStr}`);
+    }
+  }
+  if (fetchedAt) {
+    try {
+      const timeStr = new Date(fetchedAt).toLocaleTimeString("zh-CN", {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      });
+      lines.push(`\n更新于 ${timeStr}`);
+    } catch (_) {}
+  }
+  lines.push("点击刷新");
+  return lines.join("\n");
+}
+
+export function GeminiUsageChip(props: GeminiUsageChipProps) {
+  const [, bump] = useState(0);
+  const blank = isBlankComposer(props.useSession);
+  const running = typeof props.useSession === "function" ? props.useSession((s: any) => s?.running) : false;
+  const prevRunning = useRef(running);
+
+  const t = useMemo(() => createTranslator(props.ctx), [props.ctx]);
 
   useEffect(() => {
     startGlobalPolling();
-    const handler = (q: QuotaSummary | null) => setQuotaData(q);
+    const handler = () => bump((n) => n + 1);
     quotaListeners.add(handler);
-    if (sharedQuota) setQuotaData(sharedQuota);
     return () => {
       quotaListeners.delete(handler);
     };
   }, []);
 
-  if (!quotaData) return null;
-  const parsed = parseQuota(quotaData);
+  useEffect(() => {
+    if (prevRunning.current === true && running === false) {
+      void pollQuota(true);
+    }
+    prevRunning.current = running;
+  }, [running]);
 
-  if (parsed.gemini5h === null) return null;
+  // Seat check: hero only on blank composer, dock only in active conversation
+  if (props.seat && (props.seat === "hero") !== blank) {
+    return null;
+  }
 
-  const isDanger = parsed.geminiWeek !== null && parsed.geminiWeek < 10;
-  const displayVal = isDanger ? parsed.geminiWeek : parsed.gemini5h;
-  const displayText = isDanger ? `周告急 (${displayVal}%)` : `${displayVal}% 剩余`;
+  const quota = sharedQuota;
+  if (!quota) return null;
+
+  const parsed = parseQuota(quota);
+  const primaryVal =
+    parsed.geminiWeek !== null && parsed.gemini5h !== null
+      ? Math.min(parsed.geminiWeek, parsed.gemini5h)
+      : parsed.geminiWeek ?? parsed.gemini5h ?? parsed.claudeWeek ?? parsed.claude5h;
+
+  if (primaryVal === null || primaryVal === undefined) return null;
+
+  const isDanger = primaryVal < 10;
+  const isWarn = primaryVal < 25;
+  const displayText = isDanger ? `周告急 (${primaryVal}%)` : `${primaryVal}% 剩余`;
+  const loading = sharedQuotaLoading;
+
+  const className = [
+    "dgo-usage",
+    loading ? "is-loading" : "",
+    isDanger ? "is-alert" : isWarn ? "is-warn" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const tooltipTitle = buildTooltip(quota, sharedQuotaFetchedAt, t);
 
   return (
-    <div className={`dgo-chip ${isDanger ? "dgo-chip-danger" : ""}`}>
-      <GeminiIcon size={14} className="dgo-chip-icon" />
-      <span>{displayText}</span>
-      <div className="dgo-tooltip">
-        <div className="dgo-tt-title">Gemini 额度详情</div>
-        {parsed.gemini5h !== null && (
-          <div className="dgo-tt-row">
-            <span>Gemini 5小时剩余：</span>
-            <span className="dgo-tt-val">{`${parsed.gemini5h}%`}</span>
-          </div>
-        )}
-        {parsed.geminiWeek !== null && (
-          <div className="dgo-tt-row">
-            <span>Gemini 本周剩余：</span>
-            <span className="dgo-tt-val">{`${parsed.geminiWeek}%`}</span>
-          </div>
-        )}
-        {parsed.claude5h !== null && (
-          <div className="dgo-tt-row" style={{ marginTop: 10 }}>
-            <span>Claude/GPT 5h剩余：</span>
-            <span className="dgo-tt-val">{`${parsed.claude5h}%`}</span>
-          </div>
-        )}
-        {parsed.claudeWeek !== null && (
-          <div className="dgo-tt-row">
-            <span>Claude/GPT 本周剩余：</span>
-            <span className="dgo-tt-val">{`${parsed.claudeWeek}%`}</span>
-          </div>
-        )}
-      </div>
+    <div className="dgo-usage-dock">
+      <button
+        type="button"
+        className={className}
+        title={tooltipTitle}
+        aria-label={`Gemini ${displayText}`}
+        onClick={() => void pollQuota(true)}
+      >
+        <span className="dgo-usage-mark">
+          <GeminiIcon size={12} />
+        </span>
+        <span className="dgo-usage-amount">{displayText}</span>
+      </button>
     </div>
   );
 }

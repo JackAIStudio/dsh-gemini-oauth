@@ -70,6 +70,7 @@ export function classifyError(message: string): string {
   if (/quota|RESOURCE_EXHAUSTED|exhausted/i.test(message)) return "QUOTA_EXCEEDED";
   if (/\b429\b|rate.?limit/i.test(message)) return "RATE_LIMIT";
   if (/\btimeout|timed out|aborted/i.test(message)) return "TIMEOUT";
+  if (/fetch failed|econnreset|socket|transport|网络/i.test(message)) return "TRANSPORT";
   return "GEMINI_OAUTH_ERROR";
 }
 
@@ -149,7 +150,15 @@ export async function* consumeSse(response: Response, _model: ModelDescriptor): 
   };
 
   while (true) {
-    const { done, value } = await reader.read();
+    let readResult: any;
+    try {
+      readResult = await reader.read();
+    } catch (err: any) {
+      const rawMsg = err?.message || String(err);
+      const causeMsg = err?.cause?.message ? ` (${err.cause.message})` : "";
+      throw new LlmError(`Gemini OAuth 数据流中断（${rawMsg}${causeMsg}），请检查代理连接稳定性。`, "TRANSPORT");
+    }
+    const { done, value } = readResult;
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split("\n");
@@ -237,11 +246,38 @@ export async function* streamChunks(
       return { ok: response.ok, status: response.status, text, response };
     };
 
-    let { ok, status, text, response } = await sendOnce();
+    const sendWithNetworkRetry = async () => {
+      let netRetries = 0;
+      const maxNetRetries = 1; // 严格仅重试 1 次快速自愈，避免掩盖节点坏死或导致会话长时间挂起
+      while (true) {
+        if (options.signal?.aborted) throw new LlmError("Gemini OAuth 请求已取消", "ABORTED");
+        try {
+          return await sendOnce();
+        } catch (err: any) {
+          if (options.signal?.aborted || err?.name === "AbortError" || err?.code === "ABORTED") {
+            throw new LlmError("Gemini OAuth 请求已取消", "ABORTED");
+          }
+          if (netRetries < maxNetRetries) {
+            netRetries++;
+            // 快速等待 500ms：让系统连接池清理失效 Socket 并重新握手
+            await sleepMs(500, options.signal);
+            continue;
+          }
+          const rawMsg = err?.message || String(err);
+          const causeMsg = err?.cause?.message ? ` (${err.cause.message})` : "";
+          throw new LlmError(
+            `Gemini OAuth 网络连接断开（${rawMsg}${causeMsg}）。已自动快速重试 1 次仍失败，请检查本地代理（ClashVerge）连接或节点状态。`,
+            "TRANSPORT",
+          );
+        }
+      }
+    };
+
+    let { ok, status, text, response } = await sendWithNetworkRetry();
     if (!ok && (status === 429 || (status === 400 && LOCATION_RETRY_PATTERN.test(text)))) {
       for (const delay of TRANSIENT_BACKOFF_MS.slice(1)) {
         await sleepMs(delay, options.signal);
-        ({ ok, status, text, response } = await sendOnce());
+        ({ ok, status, text, response } = await sendWithNetworkRetry());
         if (ok) break;
         if (!(status === 429 || (status === 400 && LOCATION_RETRY_PATTERN.test(text)))) break;
       }

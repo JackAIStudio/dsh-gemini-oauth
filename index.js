@@ -453,6 +453,7 @@ function modelDescriptor(id, name2, family, extra = {}) {
   };
 }
 var STATIC_CATALOG = [
+  modelDescriptor("gemini-3.8-flash-tiered", "Gemini 3.8 Flash (Tiered)", "gemini"),
   modelDescriptor("gemini-3.7-flash-tiered", "Gemini 3.7 Flash (Tiered)", "gemini"),
   modelDescriptor("gemini-3.6-flash-high", "Gemini 3.6 Flash (High)", "gemini"),
   modelDescriptor("gemini-3.6-flash-medium", "Gemini 3.6 Flash (Medium)", "gemini"),
@@ -939,6 +940,7 @@ function classifyError(message) {
   if (/quota|RESOURCE_EXHAUSTED|exhausted/i.test(message)) return "QUOTA_EXCEEDED";
   if (/\b429\b|rate.?limit/i.test(message)) return "RATE_LIMIT";
   if (/\btimeout|timed out|aborted/i.test(message)) return "TIMEOUT";
+  if (/fetch failed|econnreset|socket|transport|网络/i.test(message)) return "TRANSPORT";
   return "GEMINI_OAUTH_ERROR";
 }
 async function* consumeSse(response, _model) {
@@ -1012,7 +1014,15 @@ async function* consumeSse(response, _model) {
     return out;
   };
   while (true) {
-    const { done, value } = await reader.read();
+    let readResult;
+    try {
+      readResult = await reader.read();
+    } catch (err) {
+      const rawMsg = err?.message || String(err);
+      const causeMsg = err?.cause?.message ? ` (${err.cause.message})` : "";
+      throw new LlmError2(`Gemini OAuth \u6570\u636E\u6D41\u4E2D\u65AD\uFF08${rawMsg}${causeMsg}\uFF09\uFF0C\u8BF7\u68C0\u67E5\u4EE3\u7406\u8FDE\u63A5\u7A33\u5B9A\u6027\u3002`, "TRANSPORT");
+    }
+    const { done, value } = readResult;
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split("\n");
@@ -1086,11 +1096,36 @@ async function* streamChunks(fetchImpl, options, model, creds, attachments) {
       const text2 = response2.ok ? "" : await response2.text().catch(() => "");
       return { ok: response2.ok, status: response2.status, text: text2, response: response2 };
     };
-    let { ok, status, text, response } = await sendOnce();
+    const sendWithNetworkRetry = async () => {
+      let netRetries = 0;
+      const maxNetRetries = 1;
+      while (true) {
+        if (options.signal?.aborted) throw new LlmError2("Gemini OAuth \u8BF7\u6C42\u5DF2\u53D6\u6D88", "ABORTED");
+        try {
+          return await sendOnce();
+        } catch (err) {
+          if (options.signal?.aborted || err?.name === "AbortError" || err?.code === "ABORTED") {
+            throw new LlmError2("Gemini OAuth \u8BF7\u6C42\u5DF2\u53D6\u6D88", "ABORTED");
+          }
+          if (netRetries < maxNetRetries) {
+            netRetries++;
+            await sleepMs(500, options.signal);
+            continue;
+          }
+          const rawMsg = err?.message || String(err);
+          const causeMsg = err?.cause?.message ? ` (${err.cause.message})` : "";
+          throw new LlmError2(
+            `Gemini OAuth \u7F51\u7EDC\u8FDE\u63A5\u65AD\u5F00\uFF08${rawMsg}${causeMsg}\uFF09\u3002\u5DF2\u81EA\u52A8\u5FEB\u901F\u91CD\u8BD5 1 \u6B21\u4ECD\u5931\u8D25\uFF0C\u8BF7\u68C0\u67E5\u672C\u5730\u4EE3\u7406\uFF08ClashVerge\uFF09\u8FDE\u63A5\u6216\u8282\u70B9\u72B6\u6001\u3002`,
+            "TRANSPORT"
+          );
+        }
+      }
+    };
+    let { ok, status, text, response } = await sendWithNetworkRetry();
     if (!ok && (status === 429 || status === 400 && LOCATION_RETRY_PATTERN.test(text))) {
       for (const delay of TRANSIENT_BACKOFF_MS.slice(1)) {
         await sleepMs(delay, options.signal);
-        ({ ok, status, text, response } = await sendOnce());
+        ({ ok, status, text, response } = await sendWithNetworkRetry());
         if (ok) break;
         if (!(status === 429 || status === 400 && LOCATION_RETRY_PATTERN.test(text))) break;
       }
@@ -1553,7 +1588,14 @@ function registerApiRoutes(ctx, runtime, ns) {
         webServer.register({ kind: "exact", path: `${API_PATH}/logout`, handler: apiHandler("POST", (req, signal) => routeRemoveAccount(req, signal)) }, "dsh-gemini-oauth/logout"),
         webServer.register({ kind: "exact", path: `${API_PATH}/switch`, handler: apiHandler("POST", (req, signal) => routeSwitchAccount(req, signal)) }, "dsh-gemini-oauth/switch"),
         webServer.register({ kind: "exact", path: `${API_PATH}/remove`, handler: apiHandler("POST", (req, signal) => routeRemoveAccount(req, signal)) }, "dsh-gemini-oauth/remove"),
-        webServer.register({ kind: "exact", path: `${API_PATH}/quota`, handler: apiHandler("POST", (req, signal) => routeQuota(req, signal)) }, "dsh-gemini-oauth/quota"),
+        webServer.register({
+          kind: "exact",
+          path: `${API_PATH}/quota`,
+          handler: apiHandler({
+            GET: (req, signal) => routeQuota(req, signal),
+            POST: (req, signal) => routeQuota(req, signal)
+          })
+        }, "dsh-gemini-oauth/quota"),
         webServer.register({ kind: "exact", path: `${API_PATH}/quota-all`, handler: apiHandler("POST", (_req, signal) => routeQuotaAll(signal)) }, "dsh-gemini-oauth/quota-all"),
         webServer.register({
           kind: "exact",
@@ -1618,7 +1660,12 @@ function apply(ctx, config) {
       return;
     }
     try {
-      const dispatcher = proxySetting.startsWith("http") || proxySetting.startsWith("socks") ? new ProxyAgent(proxySetting) : new ProxyAgent(`http://${proxySetting}`);
+      const proxyUri = proxySetting.startsWith("http") || proxySetting.startsWith("socks") ? proxySetting : `http://${proxySetting}`;
+      const dispatcher = new ProxyAgent({
+        uri: proxyUri,
+        keepAliveTimeout: 15e3,
+        keepAliveMaxTimeout: 3e4
+      });
       runtime.setFetch((input, init) => undiciFetch(input, { ...init, dispatcher }));
       ctx.logger.info("llm-gemini-oauth: proxy enabled", proxySetting);
     } catch (error) {

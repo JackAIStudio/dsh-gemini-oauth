@@ -156,11 +156,41 @@ function createTranslator(ctx) {
 
 // src/client/styles.ts
 var STYLE_ID = "dsh-gemini-oauth-settings-style";
+var GEMINI_NAV_MARKER = "data-dsh-gemini-settings-nav";
+var GEMINI_PATH = "M12 2c-.6 5-4 8.5-9 9 5 .5 8.4 4 9 9 .6-5 4-8.5 9-9-5-.5-8.4-4-9-9Z";
+var GEMINI_MASK_SVG = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='${GEMINI_PATH}' fill='black'/%3E%3C/svg%3E")`;
+var DOCK_CSS = `
+[data-slot="conversation.composer.dock"]:has(> .dgo-usage-dock){display:flex!important;flex-flow:row nowrap;justify-content:center;align-items:center;box-sizing:border-box;width:100%;max-width:var(--dsh-chat-content-width);min-width:0;padding:4px calc(var(--dsh-composer-side-clearance) + 16px) 0;overflow:hidden}
+[data-slot="conversation.composer.dock"]:has(> .dgo-usage-dock)>*{box-sizing:border-box;flex:0 1 auto;min-width:0;width:auto!important;max-width:none!important;margin:0!important;padding:0!important}
+[data-phase="hero"] [data-slot="conversation.input.dock"]:has(> .dgo-usage-dock){display:flex!important;flex:none!important;flex-flow:row nowrap;justify-content:center;align-items:center;box-sizing:border-box;width:100%;max-width:var(--dsh-chat-content-width);min-width:0;min-height:20px;padding:4px calc(var(--dsh-composer-side-clearance) + 16px);overflow:visible;order:30;align-self:center}
+[data-phase="hero"] [data-slot="conversation.input.dock"]:has(> .dgo-usage-dock)>*{box-sizing:border-box;flex:0 1 auto;min-width:0;width:auto!important;max-width:none!important;margin:0!important;padding:0!important}
+.dgo-usage-dock{display:inline-flex;align-items:center;flex:none;line-height:20px}
+[data-slot="conversation.composer.dock"]:has(> .dgo-usage-dock)>.dgo-usage-dock{flex:none;overflow:visible}
+[data-phase="hero"] [data-slot="conversation.input.dock"]:has(> .dgo-usage-dock)>.dgo-usage-dock{flex:none;overflow:visible}
+.dgo-usage-dock:not(:last-child):after{content:"|";color:var(--dsw-alias-separator-primary);margin:0 10px;font-size:12px;line-height:20px}
+.dgo-usage{appearance:none;display:inline-flex;align-items:center;gap:6px;height:20px;padding:0 2px;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-label-tertiary);font:inherit;font-size:12px;line-height:20px;letter-spacing:.01em;white-space:nowrap;cursor:pointer;user-select:none}
+.dgo-usage:hover,.dgo-usage:focus-visible{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary);outline:none}
+.dgo-usage-amount{color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+.dgo-usage.is-warn .dgo-usage-amount{color:var(--dsw-alias-state-warn-primary)}
+.dgo-usage.is-alert .dgo-usage-amount{color:var(--dsw-alias-state-error-primary)}
+.dgo-usage-mark{display:block;opacity:.78;flex:none}
+.dgo-usage:hover .dgo-usage-mark,.dgo-usage:focus-visible .dgo-usage-mark{opacity:.95}
+.dgo-usage.is-loading .dgo-usage-mark{opacity:.95;animation:dgo-usage-spin .8s linear infinite}
+@media (prefers-reduced-motion:reduce){.dgo-usage.is-loading .dgo-usage-mark{animation:none}}
+@keyframes dgo-usage-spin{to{transform:rotate(360deg)}}
+@media (max-width:640px){[data-slot="conversation.composer.dock"]:has(> .dgo-usage-dock),[data-phase="hero"] [data-slot="conversation.input.dock"]:has(> .dgo-usage-dock){padding-left:12px;padding-right:12px}}
+`;
 function installStyle() {
-  if (typeof document === "undefined" || document.getElementById(STYLE_ID)) return;
-  const style = document.createElement("style");
-  style.id = STYLE_ID;
+  if (typeof document === "undefined") return;
+  let style = document.getElementById(STYLE_ID);
+  if (!style) {
+    style = document.createElement("style");
+    style.id = STYLE_ID;
+    document.head.appendChild(style);
+  }
   style.textContent = `
+[${GEMINI_NAV_MARKER}] > svg:first-child{display:none!important}
+[${GEMINI_NAV_MARKER}]::before{content:""!important;flex:none!important;width:16px!important;height:16px!important;background:currentColor!important;-webkit-mask:${GEMINI_MASK_SVG} center / contain no-repeat!important;mask:${GEMINI_MASK_SVG} center / contain no-repeat!important}
 .dgo-wrap{box-sizing:border-box;width:100%;max-width:760px;padding:0 0 24px;color:#111827}
 .dgo-page-head{display:flex;align-items:center;gap:10px}
 .dgo-brand-icon{color:#111827;flex-shrink:0}
@@ -239,20 +269,8 @@ function installStyle() {
 .dgo-model-text{min-width:0;flex:1 1 auto}
 .dgo-model-name{display:block;font-size:13px;font-weight:650;color:#111827;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dgo-model-sub{display:block;margin-top:2px;color:#9aa3b0;font-size:12px;line-height:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.dgo-chip{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:inherit;cursor:default;position:relative;user-select:none;white-space:nowrap;flex:0 0 auto !important;line-height:20px}
-.dgo-chip:not(:last-child)::after{content:"|";color:var(--dsw-alias-separator-primary, rgba(0,0,0,0.2));margin:0 10px;font-size:12px;line-height:20px}
-.dgo-chip:hover{opacity:0.8}
-.dgo-chip-danger{color:#dc2626}
-.dgo-chip-danger:hover{opacity:0.8}
-.dgo-chip-icon{width:14px;height:14px;color:inherit;flex-shrink:0}
-.dgo-tooltip{position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);background:#111827;color:#fff;padding:10px 12px;border-radius:8px;font-size:12px;line-height:18px;white-space:nowrap;pointer-events:none;opacity:0;transition:opacity 0.15s;z-index:99999;box-shadow:0 4px 12px rgba(0,0,0,0.15)}
-.dgo-chip:hover .dgo-tooltip{opacity:1}
-.dgo-tooltip::after{content:"";position:absolute;top:100%;left:50%;transform:translateX(-50%);border-width:5px;border-style:solid;border-color:#111827 transparent transparent transparent}
-.dgo-tt-title{font-weight:600;margin-bottom:6px;color:#e5e7eb}
-.dgo-tt-row{display:flex;justify-content:space-between;gap:16px;margin-top:4px;color:#9ca3af}
-.dgo-tt-val{color:#fff;font-weight:500}
+${DOCK_CSS}
 `;
-  document.head.append(style);
 }
 
 // src/client/components/GeminiIcon.tsx
@@ -331,6 +349,7 @@ async function netFetch(path, options) {
 }
 
 // src/client/quota-state.ts
+var FOCUS_DEBOUNCE_MS = 15e3;
 function formatReset(resetTime, t) {
   if (!resetTime) return "n/a";
   const timestamp = Date.parse(resetTime);
@@ -349,13 +368,13 @@ function parseQuota(rawQuota) {
   const parsed = { gemini5h: null, geminiWeek: null, claude5h: null, claudeWeek: null };
   if (!rawQuota || !Array.isArray(rawQuota.groups)) return parsed;
   for (const group of rawQuota.groups) {
-    const isGemini = group.displayName && group.displayName.includes("Gemini");
-    const isClaude = group.displayName && group.displayName.includes("Claude");
+    const isGemini = group.displayName && /gemini/i.test(group.displayName);
+    const isClaude = group.displayName && /claude|gpt|3p|openai|anthropic/i.test(group.displayName);
     if (!isGemini && !isClaude) continue;
     if (!Array.isArray(group.buckets)) continue;
     for (const bucket of group.buckets) {
-      const is5h = bucket.displayName && bucket.displayName.includes("Five Hour");
-      const isWeek = bucket.displayName && bucket.displayName.includes("Weekly");
+      const is5h = bucket.displayName && /5\s*hour|five\s*hour/i.test(bucket.displayName) || bucket.bucketId === "gemini-5h" || bucket.bucketId === "3p-5h";
+      const isWeek = bucket.displayName && /week/i.test(bucket.displayName) || bucket.bucketId === "gemini-weekly" || bucket.bucketId === "3p-weekly";
       const val = Math.max(0, Math.min(100, Math.round((bucket.remainingFraction ?? 0) * 1e3) / 10));
       if (isGemini && is5h) parsed.gemini5h = val;
       if (isGemini && isWeek) parsed.geminiWeek = val;
@@ -366,37 +385,62 @@ function parseQuota(rawQuota) {
   return parsed;
 }
 var sharedQuota = null;
+var sharedQuotaFetchedAt = null;
+var sharedQuotaLoading = false;
+var lastFetchAt = 0;
 var quotaListeners = /* @__PURE__ */ new Set();
 var quotaPollTimer = void 0;
-var isPolling = false;
+var inFlightPoll = null;
+function notifyQuotaListeners() {
+  for (const fn of quotaListeners) {
+    try {
+      fn();
+    } catch (_) {
+    }
+  }
+}
 function publishQuota(value) {
   if (!value || !value.quota) return;
   sharedQuota = value.quota;
-  for (const fn of quotaListeners) fn(sharedQuota);
+  sharedQuotaFetchedAt = value.fetchedAt || (/* @__PURE__ */ new Date()).toISOString();
+  sharedQuotaLoading = false;
+  lastFetchAt = Date.now();
+  notifyQuotaListeners();
 }
 async function pollQuota(force = false) {
-  if (!force && (typeof document !== "undefined" && (document.hidden || !document.hasFocus()))) return;
-  if (isPolling) return;
-  isPolling = true;
-  try {
-    const val = await api("/quota", { method: "POST" });
-    if (val && val.quota) {
-      sharedQuota = val.quota;
-      for (const fn of quotaListeners) fn(sharedQuota);
-    }
-  } catch {
-  } finally {
-    isPolling = false;
+  if (!force && (typeof document !== "undefined" && (document.hidden || !document.hasFocus()) || lastFetchAt > 0 && Date.now() - lastFetchAt < FOCUS_DEBOUNCE_MS && sharedQuota !== null)) {
+    return;
   }
+  if (inFlightPoll !== null) {
+    return inFlightPoll;
+  }
+  sharedQuotaLoading = true;
+  notifyQuotaListeners();
+  inFlightPoll = (async () => {
+    try {
+      const val = await api("/quota", { method: "POST" });
+      if (val && val.quota) {
+        sharedQuota = val.quota;
+        sharedQuotaFetchedAt = val.fetchedAt || (/* @__PURE__ */ new Date()).toISOString();
+        lastFetchAt = Date.now();
+      }
+    } catch {
+    } finally {
+      sharedQuotaLoading = false;
+      inFlightPoll = null;
+      notifyQuotaListeners();
+    }
+  })();
+  return inFlightPoll;
 }
 function startGlobalPolling() {
   if (quotaPollTimer === void 0 && typeof window !== "undefined") {
-    pollQuota(true);
-    quotaPollTimer = window.setInterval(() => pollQuota(false), 3e4);
+    void pollQuota(true);
+    quotaPollTimer = window.setInterval(() => void pollQuota(false), 3e4);
     window.addEventListener("visibilitychange", () => {
-      if (!document.hidden) pollQuota(true);
+      if (!document.hidden) void pollQuota(false);
     });
-    window.addEventListener("focus", () => pollQuota(true));
+    window.addEventListener("focus", () => void pollQuota(false));
   }
 }
 
@@ -917,69 +961,174 @@ function GeminiSettings({ ctx }) {
 // src/client/components/GeminiUsageChip.tsx
 var import_react3 = require("react");
 var import_jsx_runtime8 = require("react/jsx-runtime");
-function GeminiUsageChip() {
-  const [quotaData, setQuotaData] = (0, import_react3.useState)(sharedQuota);
+function isBlankComposer(useSession) {
+  return typeof useSession === "function" && useSession((s) => s?.composerPhase) === "blank";
+}
+function buildTooltip(quota, fetchedAt, t) {
+  if (!quota || !Array.isArray(quota.groups)) return t("quota");
+  const lines = ["Gemini \u989D\u5EA6\u8BE6\u60C5"];
+  for (const group of quota.groups) {
+    if (!group.buckets || group.buckets.length === 0) continue;
+    lines.push(`
+\u3010${group.displayName || "\u989D\u5EA6"}\u3011`);
+    for (const b of group.buckets) {
+      const pct = Math.max(0, Math.min(100, Math.round((b.remainingFraction ?? 0) * 1e3) / 10));
+      const resetStr = b.resetTime ? ` \xB7 ${t("resetPrefix", { time: formatReset(b.resetTime, t) })}` : "";
+      lines.push(`${b.displayName || b.bucketId}\uFF1A${pct}% \u5269\u4F59${resetStr}`);
+    }
+  }
+  if (fetchedAt) {
+    try {
+      const timeStr = new Date(fetchedAt).toLocaleTimeString("zh-CN", {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit"
+      });
+      lines.push(`
+\u66F4\u65B0\u4E8E ${timeStr}`);
+    } catch (_) {
+    }
+  }
+  lines.push("\u70B9\u51FB\u5237\u65B0");
+  return lines.join("\n");
+}
+function GeminiUsageChip(props) {
+  const [, bump] = (0, import_react3.useState)(0);
+  const blank = isBlankComposer(props.useSession);
+  const running = typeof props.useSession === "function" ? props.useSession((s) => s?.running) : false;
+  const prevRunning = (0, import_react3.useRef)(running);
+  const t = (0, import_react3.useMemo)(() => createTranslator(props.ctx), [props.ctx]);
   (0, import_react3.useEffect)(() => {
     startGlobalPolling();
-    const handler = (q) => setQuotaData(q);
+    const handler = () => bump((n) => n + 1);
     quotaListeners.add(handler);
-    if (sharedQuota) setQuotaData(sharedQuota);
     return () => {
       quotaListeners.delete(handler);
     };
   }, []);
-  if (!quotaData) return null;
-  const parsed = parseQuota(quotaData);
-  if (parsed.gemini5h === null) return null;
-  const isDanger = parsed.geminiWeek !== null && parsed.geminiWeek < 10;
-  const displayVal = isDanger ? parsed.geminiWeek : parsed.gemini5h;
-  const displayText = isDanger ? `\u5468\u544A\u6025 (${displayVal}%)` : `${displayVal}% \u5269\u4F59`;
-  return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: `dgo-chip ${isDanger ? "dgo-chip-danger" : ""}`, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(GeminiIcon, { size: 14, className: "dgo-chip-icon" }),
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { children: displayText }),
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "dgo-tooltip", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "dgo-tt-title", children: "Gemini \u989D\u5EA6\u8BE6\u60C5" }),
-      parsed.gemini5h !== null && /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "dgo-tt-row", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { children: "Gemini 5\u5C0F\u65F6\u5269\u4F59\uFF1A" }),
-        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "dgo-tt-val", children: `${parsed.gemini5h}%` })
-      ] }),
-      parsed.geminiWeek !== null && /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "dgo-tt-row", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { children: "Gemini \u672C\u5468\u5269\u4F59\uFF1A" }),
-        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "dgo-tt-val", children: `${parsed.geminiWeek}%` })
-      ] }),
-      parsed.claude5h !== null && /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "dgo-tt-row", style: { marginTop: 10 }, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { children: "Claude/GPT 5h\u5269\u4F59\uFF1A" }),
-        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "dgo-tt-val", children: `${parsed.claude5h}%` })
-      ] }),
-      parsed.claudeWeek !== null && /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "dgo-tt-row", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { children: "Claude/GPT \u672C\u5468\u5269\u4F59\uFF1A" }),
-        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "dgo-tt-val", children: `${parsed.claudeWeek}%` })
-      ] })
-    ] })
-  ] });
+  (0, import_react3.useEffect)(() => {
+    if (prevRunning.current === true && running === false) {
+      void pollQuota(true);
+    }
+    prevRunning.current = running;
+  }, [running]);
+  if (props.seat && props.seat === "hero" !== blank) {
+    return null;
+  }
+  const quota = sharedQuota;
+  if (!quota) return null;
+  const parsed = parseQuota(quota);
+  const primaryVal = parsed.geminiWeek !== null && parsed.gemini5h !== null ? Math.min(parsed.geminiWeek, parsed.gemini5h) : parsed.geminiWeek ?? parsed.gemini5h ?? parsed.claudeWeek ?? parsed.claude5h;
+  if (primaryVal === null || primaryVal === void 0) return null;
+  const isDanger = primaryVal < 10;
+  const isWarn = primaryVal < 25;
+  const displayText = isDanger ? `\u5468\u544A\u6025 (${primaryVal}%)` : `${primaryVal}% \u5269\u4F59`;
+  const loading = sharedQuotaLoading;
+  const className = [
+    "dgo-usage",
+    loading ? "is-loading" : "",
+    isDanger ? "is-alert" : isWarn ? "is-warn" : ""
+  ].filter(Boolean).join(" ");
+  const tooltipTitle = buildTooltip(quota, sharedQuotaFetchedAt, t);
+  return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "dgo-usage-dock", children: /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(
+    "button",
+    {
+      type: "button",
+      className,
+      title: tooltipTitle,
+      "aria-label": `Gemini ${displayText}`,
+      onClick: () => void pollQuota(true),
+      children: [
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "dgo-usage-mark", children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(GeminiIcon, { size: 12 }) }),
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "dgo-usage-amount", children: displayText })
+      ]
+    }
+  ) });
 }
 
 // src/client/index.tsx
 var import_jsx_runtime9 = require("react/jsx-runtime");
 var inject = ["slots", "locale"];
+function registerGeminiSettingsNavIcon() {
+  if (typeof document === "undefined") return () => {
+  };
+  let disposed = false;
+  const sync = () => {
+    if (disposed) return;
+    const buttons = document.querySelectorAll('[role="dialog"] nav button');
+    for (const b of buttons) {
+      const text = b.textContent ? b.textContent.trim() : "";
+      const match = text === "Gemini OAuth \u767B\u5F55" || text === "Gemini OAuth Login" || text === "Gemini OAuth";
+      if (match) b.setAttribute(GEMINI_NAV_MARKER, "");
+      else b.removeAttribute(GEMINI_NAV_MARKER);
+    }
+  };
+  sync();
+  const observer = new MutationObserver(sync);
+  observer.observe(document.body, { childList: true, subtree: true });
+  const onDocClick = () => {
+    setTimeout(sync, 20);
+    setTimeout(sync, 120);
+  };
+  document.addEventListener("click", onDocClick);
+  return () => {
+    disposed = true;
+    observer.disconnect();
+    document.removeEventListener("click", onDocClick);
+    document.querySelectorAll(`[${GEMINI_NAV_MARKER}]`).forEach((el) => {
+      el.removeAttribute(GEMINI_NAV_MARKER);
+    });
+  };
+}
 function apply(ctx) {
   installStyle();
+  const cleanupNavIcon = registerGeminiSettingsNavIcon();
+  if (ctx.effect && typeof ctx.effect === "function") {
+    ctx.effect(() => () => {
+      cleanupNavIcon();
+    }, "dsh-gemini-oauth nav icon");
+  }
   if (ctx.locale && typeof ctx.locale.register === "function") {
     ctx.locale.register(NS, { zh, en });
   }
-  ctx.slots.inject("settings.section", () => ctx.slots.register({
-    name: "settings.section",
-    id: "gemini-oauth",
-    order: 13,
-    label: () => "Gemini OAuth \u767B\u5F55",
-    icon: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(GeminiIcon, { size: 14 })
-  }, (props) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(GeminiSettings, { ...props, ctx })));
-  ctx.slots.inject("conversation.composer.dock", () => ctx.slots.register({
-    name: "conversation.composer.dock",
-    id: "dsh-gemini-oauth-usage-dock",
-    order: -90,
-    label: () => "Gemini OAuth"
-  }, (props) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(GeminiUsageChip, { ...props })));
+  startGlobalPolling();
+  ctx.slots.inject(
+    "settings.section",
+    () => ctx.slots.register(
+      {
+        name: "settings.section",
+        id: "gemini-oauth",
+        order: 13,
+        label: () => "Gemini OAuth \u767B\u5F55",
+        icon: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(GeminiIcon, { size: 14 })
+      },
+      (props) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(GeminiSettings, { ...props, ctx })
+    )
+  );
+  ctx.slots.inject(
+    "conversation.composer.dock",
+    () => ctx.slots.register(
+      {
+        name: "conversation.composer.dock",
+        id: "dsh-gemini-oauth-usage-dock",
+        order: -8,
+        label: () => "Gemini OAuth"
+      },
+      (props) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(GeminiUsageChip, { ...props, seat: "dock", ctx })
+    )
+  );
+  ctx.slots.inject(
+    "conversation.input.dock",
+    () => ctx.slots.register(
+      {
+        name: "conversation.input.dock",
+        id: "dsh-gemini-oauth-usage-hero",
+        order: 52,
+        label: () => "Gemini OAuth"
+      },
+      (props) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(GeminiUsageChip, { ...props, seat: "hero", ctx })
+    )
+  );
 }
 
 

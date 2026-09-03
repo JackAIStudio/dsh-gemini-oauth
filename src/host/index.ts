@@ -70,9 +70,14 @@ export function apply(ctx: any, config: any): void {
       return;
     }
     try {
-      const dispatcher = proxySetting.startsWith("http") || proxySetting.startsWith("socks")
-        ? new ProxyAgent(proxySetting)
-        : new ProxyAgent(`http://${proxySetting}`);
+      const proxyUri = proxySetting.startsWith("http") || proxySetting.startsWith("socks")
+        ? proxySetting
+        : `http://${proxySetting}`;
+      const dispatcher = new ProxyAgent({
+        uri: proxyUri,
+        keepAliveTimeout: 15_000,
+        keepAliveMaxTimeout: 30_000,
+      });
       runtime.setFetch((input: any, init: any) => undiciFetch(input, { ...init, dispatcher }) as any);
       ctx.logger.info("llm-gemini-oauth: proxy enabled", proxySetting);
     } catch (error) {
