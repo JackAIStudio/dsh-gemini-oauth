@@ -1,7 +1,22 @@
 // dsh-gemini-oauth — Gemini (Google Antigravity / Cloud Code Assist) provider for DeepSeek Harness.
 
 import z from "@deepseek-ai/schemastery";
-import { installSettingsSection, settingsNamespace } from "@deepseek-ai/dsh-settings";
+const settingsNamespace = (ns: string) => ns as any;
+function installSectionCompat(ctx: any, ns: string, schema: any, entry: any, hooks: any) {
+  ctx.inject(["settings"], (sctx: any) => {
+    if (sctx.settings && typeof sctx.settings.installSection === "function") {
+      sctx.settings.installSection(ctx, ns, schema, entry, hooks);
+    } else if (sctx.settings && typeof sctx.settings.register === "function") {
+      const scope = sctx.settings.register(ns, schema, {
+        base: entry,
+        ...(hooks.validate ? { validate: hooks.validate } : {}),
+      });
+      hooks.setSource(() => scope.get());
+      hooks.onChange();
+      scope.watch?.(() => hooks.onChange());
+    }
+  });
+}
 import { ProxyAgent, fetch as undiciFetch } from "undici";
 import {
   PROVIDER,
@@ -98,7 +113,7 @@ export function apply(ctx: any, config: any): void {
 
   registerApiRoutes(ctx, runtime, NS);
 
-  installSettingsSection(ctx, NS, Config, config, {
+  installSectionCompat(ctx, NS, Config, config, {
     setSource: (source: any) => {
       current = source;
     },

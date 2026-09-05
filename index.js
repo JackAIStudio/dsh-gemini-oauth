@@ -416,7 +416,6 @@ var init_cca_client = __esm({
 init_constants();
 init_store();
 import z from "@deepseek-ai/schemastery";
-import { installSettingsSection, settingsNamespace } from "@deepseek-ai/dsh-settings";
 import { ProxyAgent, fetch as undiciFetch } from "undici";
 
 // src/host/catalog.ts
@@ -1628,6 +1627,22 @@ function registerApiRoutes(ctx, runtime, ns) {
 }
 
 // src/host/index.ts
+var settingsNamespace = (ns) => ns;
+function installSectionCompat(ctx, ns, schema, entry, hooks) {
+  ctx.inject(["settings"], (sctx) => {
+    if (sctx.settings && typeof sctx.settings.installSection === "function") {
+      sctx.settings.installSection(ctx, ns, schema, entry, hooks);
+    } else if (sctx.settings && typeof sctx.settings.register === "function") {
+      const scope = sctx.settings.register(ns, schema, {
+        base: entry,
+        ...hooks.validate ? { validate: hooks.validate } : {}
+      });
+      hooks.setSource(() => scope.get());
+      hooks.onChange();
+      scope.watch?.(() => hooks.onChange());
+    }
+  });
+}
 var name = "dsh-gemini-oauth";
 var inject = ["llm"];
 var Config = z.object({
@@ -1684,7 +1699,7 @@ function apply(ctx, config) {
   }]);
   ctx.llm.registerAdapter([PROVIDER], adapter);
   registerApiRoutes(ctx, runtime, NS);
-  installSettingsSection(ctx, NS, Config, config, {
+  installSectionCompat(ctx, NS, Config, config, {
     setSource: (source) => {
       current = source;
     },
