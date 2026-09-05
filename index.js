@@ -692,7 +692,7 @@ init_constants();
 init_cca_client();
 init_store();
 import { randomUUID as randomUUID2 } from "node:crypto";
-import { CallId, LlmError as LlmError2, attributionHeaders } from "@deepseek-ai/dsh-llm";
+import { LlmError as LlmError2, attributionHeaders } from "@deepseek-ai/dsh-llm";
 
 // src/host/wire.ts
 init_constants();
@@ -895,6 +895,7 @@ async function buildRequest(options, model, projectId, access, attachments, sign
 }
 
 // src/host/stream.ts
+var CallId = (id) => id;
 function isJsonRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

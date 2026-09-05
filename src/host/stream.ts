@@ -1,7 +1,8 @@
 // SSE streaming, backoff retry, error attribution, and StreamChunk production
 
 import { randomUUID } from "node:crypto";
-import { CallId, LlmError, attributionHeaders } from "@deepseek-ai/dsh-llm";
+import { LlmError, attributionHeaders } from "@deepseek-ai/dsh-llm";
+const CallId = (id: string) => id as any;
 import {
   ENDPOINTS,
   LOCATION_RETRY_PATTERN,
