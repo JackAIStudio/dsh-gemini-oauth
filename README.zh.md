@@ -8,7 +8,7 @@ DeepSeek Harness 自有、独立维护的 **Gemini (Google Antigravity / Cloud C
 
 - **Google 订阅 OAuth (PKCE) 登录 / 退出**——走 Antigravity / Cloud Code Assist 的公开客户端凭据，不要求 console API key。
 - **模型走订阅额度**：Gemini Flash / Pro（含 tiered 档位）、账号下的 Claude / GPT-OSS 都在模型选择器里，吃 5 小时桶 + 周桶。
-- **额度展示**：设置 → Gemini OAuth 卡，显示 Gemini 与 Claude/GPT 两个池的额度进度与重置倒计时。
+- **额度展示**：设置 → Gemini OAuth 卡，按账号列出 Gemini 每周 / 每 5 小时剩余与重置倒计时，无需切换即可对照；不展示 Claude/GPT 额度池。
 - **模型白名单**：同一张设置卡里可按模型勾选 —— 勾选的才会出现在模型选择器；「全选 / 全不选」一键切换；持久化在 `$DSH_HOME/gemini-oauth-models.json`（未配置 = 全部可见）。
 - **代理自适应**：设置卡「网络」填 `host:port`（默认继承 `HTTPS_PROXY` / `ALL_PROXY`；`direct` 强制直连）。国内需要能出 Google。
 - **原生体验**：thinking（reasoning-delta）、流式输出、工具调用（functionDeclarations / functionCall）按 DSH 原生 chunk 协议映射；不注入厂商 system prompt。

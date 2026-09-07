@@ -54,8 +54,12 @@ export function installStyle(): void {
 .dgo-btn-primary:hover{background:#272d38}
 .dgo-account{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;padding:12px;border:1px solid #eef1f5;border-radius:10px;background:#fafbfc;color:#4b5563}
 .dgo-account-list{display:flex;flex-direction:column;gap:8px;margin-bottom:14px}
-.dgo-account-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid #eef1f5;border-radius:10px;background:#fafbfc;color:#4b5563}
+.dgo-account-row{display:flex;flex-direction:column;align-items:stretch;gap:8px;padding:12px;border:1px solid #eef1f5;border-radius:10px;background:#fafbfc;color:#4b5563}
+.dgo-account-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
 .dgo-account-main{display:flex;flex-direction:column;gap:5px;min-width:0;flex:1 1 auto}
+.dgo-account-quota{display:flex;flex-direction:column;min-width:0}
+.dgo-account-quota .dgo-row{padding:8px 0 0;border-top:0}
+.dgo-account-quota .dgo-row:first-child{padding-top:2px}
 .dgo-account-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:16px}
 .dgo-active-badge{display:inline-flex;align-items:center;font-size:12px;line-height:16px;font-weight:650;color:#059669;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:999px;padding:1px 8px}
 .dgo-account-caption{font-size:12px;line-height:16px;color:#8b93a1}

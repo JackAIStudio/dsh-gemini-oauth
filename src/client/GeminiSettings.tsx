@@ -12,7 +12,6 @@ import { installStyle } from "./styles";
 import { publishQuota } from "./quota-state";
 import { GeminiIcon } from "./components/GeminiIcon";
 import { AccountList } from "./components/AccountList";
-import { QuotaSection } from "./components/QuotaSection";
 import { ModelSelector } from "./components/ModelSelector";
 import { NetworkSection } from "./components/NetworkSection";
 import type { ClientStatusState, NetStatusState, QuotaDataResponse } from "./types";
@@ -119,12 +118,13 @@ export function GeminiSettings({ ctx }: { ctx: any }) {
     setBusy(true);
     setError("");
     try {
-      const value = await api<QuotaDataResponse>("/quota", { method: "POST" });
+      const [value] = await Promise.all([
+        api<QuotaDataResponse>("/quota", { method: "POST" }),
+        refreshQuotaAll(),
+      ]);
       setQuota(value);
       publishQuota(value);
-      await refreshStatus();
-      await refreshModels();
-      await refreshQuotaAll();
+      await Promise.all([refreshStatus(), refreshModels()]);
     } catch (err: any) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -295,6 +295,7 @@ export function GeminiSettings({ ctx }: { ctx: any }) {
           <AccountList
             accounts={accountList}
             quotaAll={quotaAll}
+            activeQuota={quota}
             busy={busy}
             onSwitch={switchAccount}
             onRemove={removeAccount}
@@ -302,23 +303,11 @@ export function GeminiSettings({ ctx }: { ctx: any }) {
           />
         )}
 
-        {!status.authenticated && (
-          <div className="dgo-empty">{tr("notSignedInDesc")}</div>
-        )}
-
-        {status.authenticated && !quota && (
-          <div className="dgo-empty">{busy ? tr("fetchingQuota") : tr("noQuotaDesc")}</div>
-        )}
-
-        {status.authenticated && (
-          <QuotaSection quota={quota ?? null} t={tr} />
-        )}
-
         {error && <div className="dgo-error">{error}</div>}
         {notice && <div className="dgo-note">{notice}</div>}
-        {quota && (
+        {(quotaAll || quota) && (
           <div className="dgo-note">
-            {tr("updatedAt", { time: new Date(quota.fetchedAt).toLocaleString() })}
+            {tr("updatedAt", { time: new Date((quotaAll?.fetchedAt ?? quota?.fetchedAt) as string).toLocaleString() })}
           </div>
         )}
       </section>

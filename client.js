@@ -44,12 +44,14 @@ var zh = {
   accountActive: "\u5F53\u524D\u4F7F\u7528",
   switchAccount: "\u5207\u6362",
   removeAccount: "\u79FB\u9664",
-  accountsHelp: "\u5BF9\u8BDD\u4E0E\u989D\u5EA6\u4F7F\u7528\u6807\u300C\u5F53\u524D\u4F7F\u7528\u300D\u7684\u8D26\u53F7\uFF1B\u767B\u5F55\u65B0\u8D26\u53F7\u540E\u4F1A\u81EA\u52A8\u5207\u6362\u5230\u5B83\u3002",
+  accountsHelp: "\u5BF9\u8BDD\u4F7F\u7528\u6807\u300C\u5F53\u524D\u4F7F\u7528\u300D\u7684\u8D26\u53F7\u3002\u5404\u8D26\u53F7\u7684\u6BCF\u5468 / \u6BCF 5 \u5C0F\u65F6 Gemini \u989D\u5EA6\u4F1A\u4E00\u5E76\u5217\u51FA\uFF0C\u65E0\u9700\u5207\u6362\u3002\u767B\u5F55\u65B0\u8D26\u53F7\u540E\u4F1A\u81EA\u52A8\u5207\u8FC7\u53BB\u3002",
   switchFailed: "\u5207\u6362\u8D26\u53F7\u5931\u8D25",
   removeFailed: "\u79FB\u9664\u8D26\u53F7\u5931\u8D25",
   accountSwitched: "\u5DF2\u5207\u6362\u5230 {email}",
   quotaFailed: "\u989D\u5EA6\u8BFB\u53D6\u5931\u8D25",
   quotaRemaining: "{val}% \u5269\u4F59",
+  quotaWeekly: "\u6BCF\u5468\u5269\u4F59",
+  quotaFiveHour: "\u6BCF 5 \u5C0F\u65F6\u5269\u4F59",
   loading: "\u52A0\u8F7D\u4E2D...",
   notSignedIn: "\u672A\u767B\u5F55",
   notSignedInDesc: "\u70B9\u51FB\u767B\u5F55\u540E\u4F1A\u5728\u6D4F\u89C8\u5668\u4E2D\u5B8C\u6210 Google OAuth\uFF1B\u767B\u5F55\u6210\u529F\u540E\u8FD9\u91CC\u4F1A\u663E\u793A\u989D\u5EA6\u3002",
@@ -93,12 +95,14 @@ var en = {
   accountActive: "Active",
   switchAccount: "Use",
   removeAccount: "Remove",
-  accountsHelp: "Chats and quota use the account marked Active; newly signed-in accounts become active automatically.",
+  accountsHelp: "Chats use the account marked Active. Each account's weekly and 5-hour Gemini quota is listed here without switching. Newly signed-in accounts become active automatically.",
   switchFailed: "Failed to switch account",
   removeFailed: "Failed to remove account",
   accountSwitched: "Switched to {email}",
   quotaFailed: "Quota unavailable",
   quotaRemaining: "{val}% left",
+  quotaWeekly: "Weekly remaining",
+  quotaFiveHour: "5-hour remaining",
   loading: "Loading...",
   notSignedIn: "Not signed in",
   notSignedInDesc: "Click Sign in to complete Google OAuth in your browser. Quotas will appear here after login.",
@@ -207,8 +211,12 @@ function installStyle() {
 .dgo-btn-primary:hover{background:#272d38}
 .dgo-account{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;padding:12px;border:1px solid #eef1f5;border-radius:10px;background:#fafbfc;color:#4b5563}
 .dgo-account-list{display:flex;flex-direction:column;gap:8px;margin-bottom:14px}
-.dgo-account-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid #eef1f5;border-radius:10px;background:#fafbfc;color:#4b5563}
+.dgo-account-row{display:flex;flex-direction:column;align-items:stretch;gap:8px;padding:12px;border:1px solid #eef1f5;border-radius:10px;background:#fafbfc;color:#4b5563}
+.dgo-account-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
 .dgo-account-main{display:flex;flex-direction:column;gap:5px;min-width:0;flex:1 1 auto}
+.dgo-account-quota{display:flex;flex-direction:column;min-width:0}
+.dgo-account-quota .dgo-row{padding:8px 0 0;border-top:0}
+.dgo-account-quota .dgo-row:first-child{padding-top:2px}
 .dgo-account-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:16px}
 .dgo-active-badge{display:inline-flex;align-items:center;font-size:12px;line-height:16px;font-weight:650;color:#059669;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:999px;padding:1px 8px}
 .dgo-account-caption{font-size:12px;line-height:16px;color:#8b93a1}
@@ -364,22 +372,52 @@ function formatReset(resetTime, t) {
   if (hours > 0) return t("timeHourMin", { hours, minutes });
   return t("timeMin", { minutes });
 }
+function isClaudeGptQuotaGroup(group) {
+  return /claude|gpt|3p|openai|anthropic/i.test(`${group.displayName || ""} ${group.description || ""}`);
+}
+function isGeminiQuotaGroup(group) {
+  return /gemini/i.test(`${group.displayName || ""} ${group.description || ""}`);
+}
+function geminiQuotaGroups(quota) {
+  if (!quota || !Array.isArray(quota.groups)) return [];
+  return quota.groups.filter(isGeminiQuotaGroup).map((group) => ({
+    displayName: group.displayName,
+    description: group.description,
+    buckets: Array.isArray(group.buckets) ? group.buckets : []
+  })).filter((group) => (group.buckets?.length ?? 0) > 0);
+}
+function geminiBucketRank(bucket) {
+  const name = `${bucket.displayName || ""} ${bucket.bucketId || ""}`;
+  if (/week/i.test(name) || bucket.bucketId === "gemini-weekly") return 0;
+  if (/5\s*hour|five\s*hour/i.test(name) || bucket.bucketId === "gemini-5h") return 1;
+  return 2;
+}
+function geminiQuotaBuckets(quota) {
+  const buckets = geminiQuotaGroups(quota).flatMap((group) => group.buckets ?? []);
+  return [...buckets].sort((a, b) => geminiBucketRank(a) - geminiBucketRank(b));
+}
+function quotaBucketLabel(bucket, t) {
+  const name = `${bucket.displayName || ""} ${bucket.bucketId || ""}`;
+  if (/week/i.test(name) || bucket.bucketId === "gemini-weekly") return t("quotaWeekly");
+  if (/5\s*hour|five\s*hour/i.test(name) || bucket.bucketId === "gemini-5h") return t("quotaFiveHour");
+  return bucket.displayName || bucket.bucketId || t("quota");
+}
 function parseQuota(rawQuota) {
   const parsed = { gemini5h: null, geminiWeek: null, claude5h: null, claudeWeek: null };
   if (!rawQuota || !Array.isArray(rawQuota.groups)) return parsed;
   for (const group of rawQuota.groups) {
-    const isGemini = group.displayName && /gemini/i.test(group.displayName);
-    const isClaude = group.displayName && /claude|gpt|3p|openai|anthropic/i.test(group.displayName);
-    if (!isGemini && !isClaude) continue;
+    const gemini = isGeminiQuotaGroup(group);
+    const claude = isClaudeGptQuotaGroup(group);
+    if (!gemini && !claude) continue;
     if (!Array.isArray(group.buckets)) continue;
     for (const bucket of group.buckets) {
       const is5h = bucket.displayName && /5\s*hour|five\s*hour/i.test(bucket.displayName) || bucket.bucketId === "gemini-5h" || bucket.bucketId === "3p-5h";
       const isWeek = bucket.displayName && /week/i.test(bucket.displayName) || bucket.bucketId === "gemini-weekly" || bucket.bucketId === "3p-weekly";
       const val = Math.max(0, Math.min(100, Math.round((bucket.remainingFraction ?? 0) * 1e3) / 10));
-      if (isGemini && is5h) parsed.gemini5h = val;
-      if (isGemini && isWeek) parsed.geminiWeek = val;
-      if (isClaude && is5h) parsed.claude5h = val;
-      if (isClaude && isWeek) parsed.claudeWeek = val;
+      if (gemini && is5h) parsed.gemini5h = val;
+      if (gemini && isWeek) parsed.geminiWeek = val;
+      if (claude && is5h) parsed.claude5h = val;
+      if (claude && isWeek) parsed.claudeWeek = val;
     }
   }
   return parsed;
@@ -444,74 +482,19 @@ function startGlobalPolling() {
   }
 }
 
-// src/client/components/AccountList.tsx
-var import_jsx_runtime2 = require("react/jsx-runtime");
-function AccountList({ accounts, quotaAll, busy, onSwitch, onRemove, t }) {
-  const quotaEntryOf = (accountId) => {
-    if (!quotaAll || !Array.isArray(quotaAll.accounts)) return void 0;
-    return quotaAll.accounts.find((entry) => entry.accountId === accountId || entry.email === accountId);
-  };
-  const accountCaptionOf = (entry) => {
-    if (entry === void 0) return void 0;
-    if (entry.status === "error") return { text: `${t("quotaFailed")}\uFF1A${entry.message ?? ""}`, error: true };
-    if (entry.status !== "ok" || !entry.quota) return void 0;
-    const parsed = parseQuota(entry.quota);
-    const val = parsed.geminiWeek ?? parsed.gemini5h ?? parsed.claudeWeek ?? parsed.claude5h;
-    return val === null ? void 0 : { text: t("quotaRemaining", { val }), error: false };
-  };
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "dgo-account-list", children: [
-    accounts.map((account) => {
-      const caption = accountCaptionOf(quotaEntryOf(account.id));
-      return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "dgo-account-row", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "dgo-account-main", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "dgo-email", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "dgo-email-mark", "aria-hidden": "true" }),
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "dgo-email-text", children: account.email || account.id })
-          ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "dgo-account-meta", children: [
-            account.active && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "dgo-active-badge", children: t("accountActive") }),
-            caption && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: `dgo-account-caption${caption.error ? " dgo-account-caption-error" : ""}`, children: caption.text })
-          ] })
-        ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "dgo-account-actions", children: [
-          !account.active && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
-            "button",
-            {
-              className: "dgo-btn",
-              disabled: busy,
-              onClick: () => onSwitch(account.id),
-              children: t("switchAccount")
-            }
-          ),
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
-            "button",
-            {
-              className: "dgo-btn",
-              disabled: busy,
-              onClick: () => onRemove(account.id),
-              children: t("removeAccount")
-            }
-          )
-        ] })
-      ] }, account.id);
-    }),
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "dgo-accounts-help", children: t("accountsHelp") })
-  ] });
-}
-
 // src/client/components/QuotaRow.tsx
-var import_jsx_runtime3 = require("react/jsx-runtime");
+var import_jsx_runtime2 = require("react/jsx-runtime");
 function QuotaRow({ bucket, accent, t }) {
   const percent = Math.max(0, Math.min(100, Math.round((bucket.remainingFraction ?? 0) * 1e3) / 10));
-  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "dgo-row", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "dgo-rowtop", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { children: bucket.displayName || bucket.bucketId || t("quota") }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "dgo-metrics", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { children: t("resetPrefix", { time: formatReset(bucket.resetTime, t) }) }),
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: `dgo-percent${accent === "cyan" ? " dgo-percent-cyan" : ""}`, children: `${percent}%` })
+  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "dgo-row", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "dgo-rowtop", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { children: bucket.displayName || bucket.bucketId || t("quota") }),
+      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "dgo-metrics", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { children: t("resetPrefix", { time: formatReset(bucket.resetTime, t) }) }),
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: `dgo-percent${accent === "cyan" ? " dgo-percent-cyan" : ""}`, children: `${percent}%` })
       ] })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "dgo-bar", children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "dgo-bar", children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
       "div",
       {
         className: `dgo-fill${accent === "cyan" ? " dgo-fill-cyan" : ""}`,
@@ -522,35 +505,90 @@ function QuotaRow({ bucket, accent, t }) {
 }
 
 // src/client/components/QuotaSection.tsx
+var import_jsx_runtime3 = require("react/jsx-runtime");
+function QuotaSection({ quota, t, embedded }) {
+  const buckets = geminiQuotaBuckets(quota);
+  if (buckets.length === 0) return null;
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: embedded ? "dgo-account-quota" : void 0, children: [
+    !embedded && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "dgo-quota-title", children: t("quota") }),
+    buckets.map((bucket, index) => /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+      QuotaRow,
+      {
+        bucket: { ...bucket, displayName: quotaBucketLabel(bucket, t) },
+        t
+      },
+      bucket.bucketId || `${bucket.displayName || "bucket"}-${index}`
+    ))
+  ] });
+}
+
+// src/client/components/AccountList.tsx
 var import_jsx_runtime4 = require("react/jsx-runtime");
-function QuotaSection({ quota, t }) {
-  if (!quota || !quota.quota || !Array.isArray(quota.quota.groups)) return null;
-  const groups = quota.quota.groups.map((group) => ({
-    displayName: group.displayName,
-    description: group.description,
-    buckets: Array.isArray(group.buckets) ? group.buckets : []
-  })).filter((group) => group.buckets && group.buckets.length > 0);
-  if (groups.length === 0) return null;
-  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(import_jsx_runtime4.Fragment, { children: [
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "dgo-quota-title", children: t("quota") }),
-    groups.map((group, index) => {
-      const isCyan = /claude|gpt|3p|openai|anthropic/i.test(`${group.displayName || ""} ${group.description || ""}`);
-      return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dgo-quota-group", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dgo-group-head", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "dgo-group-title", children: group.displayName || t("quota") }),
-          group.description && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "dgo-group-desc", children: group.description })
+function quotaOf(account, quotaAll, activeQuota) {
+  const fromAll = quotaAll?.accounts.find(
+    (entry) => entry.accountId === account.id || entry.email === account.id || account.email !== void 0 && entry.email === account.email
+  );
+  if (fromAll) return fromAll;
+  if (account.active && activeQuota?.quota) {
+    return {
+      accountId: account.id,
+      email: account.email,
+      active: true,
+      status: "ok",
+      quota: activeQuota.quota
+    };
+  }
+  return void 0;
+}
+function geminiQuotaOrUndefined(quota) {
+  if (!quota) return quota;
+  return geminiQuotaBuckets(quota).length > 0 ? quota : void 0;
+}
+function AccountList({ accounts, quotaAll, activeQuota, busy, onSwitch, onRemove, t }) {
+  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dgo-account-list", children: [
+    accounts.map((account) => {
+      const entry = quotaOf(account, quotaAll, activeQuota);
+      const geminiQuota = entry?.status === "ok" ? geminiQuotaOrUndefined(entry.quota) : void 0;
+      const waiting = entry === void 0 && (busy || quotaAll === void 0);
+      return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dgo-account-row", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dgo-account-head", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dgo-account-main", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dgo-email", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "dgo-email-mark", "aria-hidden": "true" }),
+              /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "dgo-email-text", children: account.email || account.id })
+            ] }),
+            /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dgo-account-meta", children: [
+              account.active && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "dgo-active-badge", children: t("accountActive") }),
+              entry?.status === "error" && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "dgo-account-caption dgo-account-caption-error", children: `${t("quotaFailed")}\uFF1A${entry.message ?? ""}` }),
+              waiting && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "dgo-account-caption", children: t("fetchingQuota") }),
+              entry?.status === "ok" && !geminiQuota && !waiting && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "dgo-account-caption", children: t("noQuotaDesc") })
+            ] })
+          ] }),
+          /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dgo-account-actions", children: [
+            !account.active && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
+              "button",
+              {
+                className: "dgo-btn",
+                disabled: busy,
+                onClick: () => onSwitch(account.id),
+                children: t("switchAccount")
+              }
+            ),
+            /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
+              "button",
+              {
+                className: "dgo-btn",
+                disabled: busy,
+                onClick: () => onRemove(account.id),
+                children: t("removeAccount")
+              }
+            )
+          ] })
         ] }),
-        group.buckets?.map((bucket, bucketIndex) => /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
-          QuotaRow,
-          {
-            bucket,
-            accent: isCyan ? "cyan" : "green",
-            t
-          },
-          bucket.bucketId || bucketIndex
-        ))
-      ] }, group.displayName || index);
-    })
+        geminiQuota && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(QuotaSection, { quota: geminiQuota, embedded: true, t })
+      ] }, account.id);
+    }),
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "dgo-accounts-help", children: t("accountsHelp") })
   ] });
 }
 
@@ -760,12 +798,13 @@ function GeminiSettings({ ctx }) {
     setBusy(true);
     setError("");
     try {
-      const value = await api("/quota", { method: "POST" });
+      const [value] = await Promise.all([
+        api("/quota", { method: "POST" }),
+        refreshQuotaAll()
+      ]);
       setQuota(value);
       publishQuota(value);
-      await refreshStatus();
-      await refreshModels();
-      await refreshQuotaAll();
+      await Promise.all([refreshStatus(), refreshModels()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -916,18 +955,16 @@ function GeminiSettings({ ctx }) {
         {
           accounts: accountList,
           quotaAll,
+          activeQuota: quota,
           busy,
           onSwitch: switchAccount,
           onRemove: removeAccount,
           t: tr
         }
       ),
-      !status.authenticated && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "dgo-empty", children: tr("notSignedInDesc") }),
-      status.authenticated && !quota && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "dgo-empty", children: busy ? tr("fetchingQuota") : tr("noQuotaDesc") }),
-      status.authenticated && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(QuotaSection, { quota: quota ?? null, t: tr }),
       error && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "dgo-error", children: error }),
       notice && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "dgo-note", children: notice }),
-      quota && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "dgo-note", children: tr("updatedAt", { time: new Date(quota.fetchedAt).toLocaleString() }) })
+      (quotaAll || quota) && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "dgo-note", children: tr("updatedAt", { time: new Date(quotaAll?.fetchedAt ?? quota?.fetchedAt).toLocaleString() }) })
     ] }),
     status.authenticated && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
       ModelSelector,
@@ -965,17 +1002,13 @@ function isBlankComposer(useSession) {
   return typeof useSession === "function" && useSession((s) => s?.composerPhase) === "blank";
 }
 function buildTooltip(quota, fetchedAt, t) {
-  if (!quota || !Array.isArray(quota.groups)) return t("quota");
+  const buckets = geminiQuotaBuckets(quota);
+  if (buckets.length === 0) return t("quota");
   const lines = ["Gemini \u989D\u5EA6\u8BE6\u60C5"];
-  for (const group of quota.groups) {
-    if (!group.buckets || group.buckets.length === 0) continue;
-    lines.push(`
-\u3010${group.displayName || "\u989D\u5EA6"}\u3011`);
-    for (const b of group.buckets) {
-      const pct = Math.max(0, Math.min(100, Math.round((b.remainingFraction ?? 0) * 1e3) / 10));
-      const resetStr = b.resetTime ? ` \xB7 ${t("resetPrefix", { time: formatReset(b.resetTime, t) })}` : "";
-      lines.push(`${b.displayName || b.bucketId}\uFF1A${pct}% \u5269\u4F59${resetStr}`);
-    }
+  for (const b of buckets) {
+    const pct = Math.max(0, Math.min(100, Math.round((b.remainingFraction ?? 0) * 1e3) / 10));
+    const resetStr = b.resetTime ? ` \xB7 ${t("resetPrefix", { time: formatReset(b.resetTime, t) })}` : "";
+    lines.push(`${quotaBucketLabel(b, t)}\uFF1A${pct}% \u5269\u4F59${resetStr}`);
   }
   if (fetchedAt) {
     try {
@@ -1018,7 +1051,7 @@ function GeminiUsageChip(props) {
   const quota = sharedQuota;
   if (!quota) return null;
   const parsed = parseQuota(quota);
-  const primaryVal = parsed.geminiWeek !== null && parsed.gemini5h !== null ? Math.min(parsed.geminiWeek, parsed.gemini5h) : parsed.geminiWeek ?? parsed.gemini5h ?? parsed.claudeWeek ?? parsed.claude5h;
+  const primaryVal = parsed.geminiWeek !== null && parsed.gemini5h !== null ? Math.min(parsed.geminiWeek, parsed.gemini5h) : parsed.geminiWeek ?? parsed.gemini5h;
   if (primaryVal === null || primaryVal === void 0) return null;
   const isDanger = primaryVal < 10;
   const isWarn = primaryVal < 25;

@@ -1,6 +1,6 @@
 // Shared global quota state, polling, and parsing helpers
 
-import type { QuotaSummary } from "../common/types";
+import type { QuotaBucket, QuotaGroup, QuotaSummary } from "../common/types";
 import { api } from "./api";
 import type { ParsedQuota, QuotaDataResponse, Translator } from "./types";
 
@@ -21,22 +21,61 @@ export function formatReset(resetTime: string | undefined, t: Translator): strin
   return t("timeMin", { minutes });
 }
 
+export function isClaudeGptQuotaGroup(group: QuotaGroup): boolean {
+  return /claude|gpt|3p|openai|anthropic/i.test(`${group.displayName || ""} ${group.description || ""}`);
+}
+
+export function isGeminiQuotaGroup(group: QuotaGroup): boolean {
+  return /gemini/i.test(`${group.displayName || ""} ${group.description || ""}`);
+}
+
+export function geminiQuotaGroups(quota?: QuotaSummary | null): QuotaGroup[] {
+  if (!quota || !Array.isArray(quota.groups)) return [];
+  return quota.groups
+    .filter(isGeminiQuotaGroup)
+    .map((group) => ({
+      displayName: group.displayName,
+      description: group.description,
+      buckets: Array.isArray(group.buckets) ? group.buckets : [],
+    }))
+    .filter((group) => (group.buckets?.length ?? 0) > 0);
+}
+
+function geminiBucketRank(bucket: QuotaBucket): number {
+  const name = `${bucket.displayName || ""} ${bucket.bucketId || ""}`;
+  if (/week/i.test(name) || bucket.bucketId === "gemini-weekly") return 0;
+  if (/5\s*hour|five\s*hour/i.test(name) || bucket.bucketId === "gemini-5h") return 1;
+  return 2;
+}
+
+export function geminiQuotaBuckets(quota?: QuotaSummary | null): QuotaBucket[] {
+  const buckets = geminiQuotaGroups(quota).flatMap((group) => group.buckets ?? []);
+  return [...buckets].sort((a, b) => geminiBucketRank(a) - geminiBucketRank(b));
+}
+
+export function quotaBucketLabel(bucket: QuotaBucket, t: Translator): string {
+  const name = `${bucket.displayName || ""} ${bucket.bucketId || ""}`;
+  if (/week/i.test(name) || bucket.bucketId === "gemini-weekly") return t("quotaWeekly");
+  if (/5\s*hour|five\s*hour/i.test(name) || bucket.bucketId === "gemini-5h") return t("quotaFiveHour");
+  return bucket.displayName || bucket.bucketId || t("quota");
+}
+
 export function parseQuota(rawQuota?: QuotaSummary | null): ParsedQuota {
   const parsed: ParsedQuota = { gemini5h: null, geminiWeek: null, claude5h: null, claudeWeek: null };
   if (!rawQuota || !Array.isArray(rawQuota.groups)) return parsed;
   for (const group of rawQuota.groups) {
-    const isGemini = group.displayName && /gemini/i.test(group.displayName);
-    const isClaude = group.displayName && /claude|gpt|3p|openai|anthropic/i.test(group.displayName);
-    if (!isGemini && !isClaude) continue;
+    const gemini = isGeminiQuotaGroup(group);
+    const claude = isClaudeGptQuotaGroup(group);
+    if (!gemini && !claude) continue;
     if (!Array.isArray(group.buckets)) continue;
     for (const bucket of group.buckets) {
       const is5h = (bucket.displayName && /5\s*hour|five\s*hour/i.test(bucket.displayName)) || bucket.bucketId === "gemini-5h" || bucket.bucketId === "3p-5h";
       const isWeek = (bucket.displayName && /week/i.test(bucket.displayName)) || bucket.bucketId === "gemini-weekly" || bucket.bucketId === "3p-weekly";
       const val = Math.max(0, Math.min(100, Math.round((bucket.remainingFraction ?? 0) * 1000) / 10));
-      if (isGemini && is5h) parsed.gemini5h = val;
-      if (isGemini && isWeek) parsed.geminiWeek = val;
-      if (isClaude && is5h) parsed.claude5h = val;
-      if (isClaude && isWeek) parsed.claudeWeek = val;
+      if (gemini && is5h) parsed.gemini5h = val;
+      if (gemini && isWeek) parsed.geminiWeek = val;
+      if (claude && is5h) parsed.claude5h = val;
+      if (claude && isWeek) parsed.claudeWeek = val;
     }
   }
   return parsed;

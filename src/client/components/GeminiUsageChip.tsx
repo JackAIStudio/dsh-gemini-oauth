@@ -3,7 +3,9 @@ import type { QuotaSummary } from "../../common/types";
 import { GeminiIcon } from "./GeminiIcon";
 import {
   formatReset,
+  geminiQuotaBuckets,
   parseQuota,
+  quotaBucketLabel,
   quotaListeners,
   sharedQuota,
   sharedQuotaFetchedAt,
@@ -25,16 +27,13 @@ function isBlankComposer(useSession: any): boolean {
 }
 
 function buildTooltip(quota: QuotaSummary | null, fetchedAt: string | null, t: Translator): string {
-  if (!quota || !Array.isArray(quota.groups)) return t("quota");
+  const buckets = geminiQuotaBuckets(quota);
+  if (buckets.length === 0) return t("quota");
   const lines: string[] = ["Gemini 额度详情"];
-  for (const group of quota.groups) {
-    if (!group.buckets || group.buckets.length === 0) continue;
-    lines.push(`\n【${group.displayName || "额度"}】`);
-    for (const b of group.buckets) {
-      const pct = Math.max(0, Math.min(100, Math.round((b.remainingFraction ?? 0) * 1000) / 10));
-      const resetStr = b.resetTime ? ` · ${t("resetPrefix", { time: formatReset(b.resetTime, t) })}` : "";
-      lines.push(`${b.displayName || b.bucketId}：${pct}% 剩余${resetStr}`);
-    }
+  for (const b of buckets) {
+    const pct = Math.max(0, Math.min(100, Math.round((b.remainingFraction ?? 0) * 1000) / 10));
+    const resetStr = b.resetTime ? ` · ${t("resetPrefix", { time: formatReset(b.resetTime, t) })}` : "";
+    lines.push(`${quotaBucketLabel(b, t)}：${pct}% 剩余${resetStr}`);
   }
   if (fetchedAt) {
     try {
@@ -86,7 +85,7 @@ export function GeminiUsageChip(props: GeminiUsageChipProps) {
   const primaryVal =
     parsed.geminiWeek !== null && parsed.gemini5h !== null
       ? Math.min(parsed.geminiWeek, parsed.gemini5h)
-      : parsed.geminiWeek ?? parsed.gemini5h ?? parsed.claudeWeek ?? parsed.claude5h;
+      : parsed.geminiWeek ?? parsed.gemini5h;
 
   if (primaryVal === null || primaryVal === undefined) return null;
 
