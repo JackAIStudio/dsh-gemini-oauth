@@ -54,6 +54,7 @@ import { buildRequest } from "./wire";
 import { GemOAuthAdapter, GemOAuthRuntime } from "./adapter";
 import { registerApiRoutes } from "./routes";
 import { getLoginSession, setLoginSession } from "./oauth";
+import { GEMINI_NATIVE_SEARCH_SERVICE, installGeminiNativeSearch, parseGeminiGroundingChunks } from "./native-search";
 
 export const name = "dsh-gemini-oauth";
 export const inject = ["llm"];
@@ -119,6 +120,10 @@ export function apply(ctx: any, config: any): void {
   }]);
   ctx.llm.registerAdapter([PROVIDER], adapter);
 
+  const geminiNativeSearch = installGeminiNativeSearch(ctx, { runtime });
+  if (typeof ctx.provide === "function") ctx.provide(GEMINI_NATIVE_SEARCH_SERVICE, geminiNativeSearch);
+  else ctx[GEMINI_NATIVE_SEARCH_SERVICE] = geminiNativeSearch;
+
   registerApiRoutes(ctx, runtime, NS);
 
   installSectionCompat(ctx, NS, Config, config, {
@@ -165,4 +170,6 @@ export {
   writeCredentialStore,
   deleteCredentialStore,
   GemOAuthAdapter,
+  GEMINI_NATIVE_SEARCH_SERVICE,
+  parseGeminiGroundingChunks,
 };

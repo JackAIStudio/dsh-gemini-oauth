@@ -1640,6 +1640,171 @@ function registerApiRoutes(ctx, runtime, ns) {
   });
 }
 
+// src/host/native-search.ts
+init_constants();
+init_cca_client();
+import { randomUUID as randomUUID3 } from "node:crypto";
+init_store();
+var GEMINI_NATIVE_SEARCH_SERVICE = "geminiNativeSearch";
+function pushSource(sources, seen, url, title, snippet) {
+  if (typeof url !== "string" || !/^https?:\/\//u.test(url)) return;
+  const label = typeof title === "string" && title.length > 0 && title !== url ? title.trim() : void 0;
+  const excerpt = typeof snippet === "string" && snippet.length > 0 ? snippet.trim() : void 0;
+  if (seen.has(url)) {
+    const existing = sources.find((s) => s.url === url);
+    if (existing !== void 0) {
+      if (existing.title === void 0 && label !== void 0) existing.title = label;
+      if (existing.snippet === void 0 && excerpt !== void 0) existing.snippet = excerpt;
+    }
+    return;
+  }
+  seen.add(url);
+  const item = { url };
+  if (label !== void 0) item.title = label;
+  if (excerpt !== void 0) item.snippet = excerpt;
+  sources.push(item);
+}
+function fillTitlesAndSnippetsFromText(sources, seen, text) {
+  const mdLinkRegex = /\[(.*?)\]\((https?:\/\/[^\s\)]+)\)/gmu;
+  for (const match of text.matchAll(mdLinkRegex)) {
+    const title = match[1]?.trim();
+    const url = match[2];
+    if (url) pushSource(sources, seen, url, title);
+  }
+}
+function parseGeminiGroundingChunks(data, maxResults) {
+  const sources = [];
+  const seen = /* @__PURE__ */ new Set();
+  const candidates = Array.isArray(data?.candidates) ? data.candidates : [];
+  let generatedText = "";
+  for (const candidate of candidates) {
+    const grounding = candidate?.groundingMetadata;
+    const chunks = Array.isArray(grounding?.groundingChunks) ? grounding.groundingChunks : [];
+    const snippetsByChunkIndex = /* @__PURE__ */ new Map();
+    const supports = Array.isArray(grounding?.groundingSupports) ? grounding.groundingSupports : [];
+    for (const support of supports) {
+      const segText = support?.segment?.text;
+      const indices = Array.isArray(support?.groundingChunkIndices) ? support.groundingChunkIndices : [];
+      if (typeof segText === "string" && segText.length > 0) {
+        for (const idx of indices) {
+          if (typeof idx === "number" && !snippetsByChunkIndex.has(idx)) {
+            snippetsByChunkIndex.set(idx, segText);
+          }
+        }
+      }
+    }
+    chunks.forEach((chunk, idx) => {
+      const web = chunk?.web;
+      if (web && typeof web.uri === "string") {
+        pushSource(sources, seen, web.uri, web.title, snippetsByChunkIndex.get(idx));
+      }
+    });
+    for (const part of candidate?.content?.parts ?? []) {
+      if (typeof part?.text === "string") generatedText += `${part.text}
+`;
+    }
+  }
+  if (sources.length === 0 && generatedText.length > 0) {
+    fillTitlesAndSnippetsFromText(sources, seen, generatedText);
+  }
+  const limit = typeof maxResults === "number" && maxResults > 0 ? maxResults : sources.length;
+  return {
+    sources: sources.slice(0, limit),
+    truncated: sources.length > limit
+  };
+}
+async function geminiNativeWebSearch(input) {
+  const query = input.query.trim();
+  if (query.length === 0) throw new Error("gemini native search: query must be non-empty");
+  const endpoint = input.endpoint || ENDPOINTS[0];
+  const modelId = runtimeModelId(input.model && input.model.length > 0 ? input.model : "gemini-3.8-flash-tiered");
+  const body = {
+    project: input.projectId,
+    model: modelId,
+    request: {
+      contents: [
+        {
+          role: "user",
+          parts: [
+            {
+              text: `Perform a Google search to answer: "${query}". Use the Google Search tool and provide accurate sources.`
+            }
+          ]
+        }
+      ],
+      generationConfig: {
+        maxOutputTokens: 2048
+      },
+      tools: [{ googleSearch: {} }]
+    },
+    requestType: "agent",
+    userAgent: "antigravity",
+    requestId: `search-${randomUUID3()}`
+  };
+  const response = await input.fetch(`${endpoint}/v1internal:streamGenerateContent?alt=sse`, {
+    method: "POST",
+    headers: {
+      ...ccaHeaders(input.access),
+      accept: "text/event-stream"
+    },
+    body: JSON.stringify(body),
+    signal: input.signal
+  });
+  if (!response.ok) {
+    const raw = await response.text().catch(() => "");
+    throw new Error(`gemini native search: HTTP ${response.status} ${raw.slice(0, 200)}`);
+  }
+  const text = await response.text();
+  const lines = text.split("\n");
+  const sources = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const line of lines) {
+    if (!line.startsWith("data:")) continue;
+    const payloadText = line.slice(5).trim();
+    if (!payloadText || payloadText === "[DONE]") continue;
+    const chunk = safeJson(payloadText);
+    if (!chunk || !chunk.response) continue;
+    const parsed = parseGeminiGroundingChunks(chunk.response, input.maxResults);
+    for (const item of parsed.sources) {
+      pushSource(sources, seen, item.url, item.title, item.snippet);
+    }
+  }
+  const limit = typeof input.maxResults === "number" && input.maxResults > 0 ? input.maxResults : sources.length;
+  return {
+    sources: sources.slice(0, limit),
+    truncated: sources.length > limit
+  };
+}
+function installGeminiNativeSearch(ctx, input) {
+  return {
+    available() {
+      return true;
+    },
+    async search(query, options) {
+      const creds = await input.runtime.ensureAccess(options?.signal);
+      const accountId = publicAccountId(creds);
+      const endpoint = ENDPOINTS[0];
+      const projectId = await projectForEndpoint(
+        input.runtime.fetch,
+        endpoint,
+        creds.access,
+        creds.projectId,
+        accountId
+      );
+      return geminiNativeWebSearch({
+        fetch: input.runtime.fetch,
+        access: creds.access,
+        projectId,
+        endpoint,
+        query,
+        model: options?.model,
+        maxResults: options?.maxResults,
+        signal: options?.signal
+      });
+    }
+  };
+}
+
 // src/host/index.ts
 var settingsNamespace = (ns) => ns;
 function installSectionCompat(ctx, ns, schema, entry, hooks) {
@@ -1712,6 +1877,9 @@ function apply(ctx, config) {
     settingsPath: []
   }]);
   ctx.llm.registerAdapter([PROVIDER], adapter);
+  const geminiNativeSearch = installGeminiNativeSearch(ctx, { runtime });
+  if (typeof ctx.provide === "function") ctx.provide(GEMINI_NATIVE_SEARCH_SERVICE, geminiNativeSearch);
+  else ctx[GEMINI_NATIVE_SEARCH_SERVICE] = geminiNativeSearch;
   registerApiRoutes(ctx, runtime, NS);
   installSectionCompat(ctx, NS, Config, config, {
     setSource: (source) => {
@@ -1729,6 +1897,7 @@ function apply(ctx, config) {
 }
 export {
   Config,
+  GEMINI_NATIVE_SEARCH_SERVICE,
   GemOAuthAdapter,
   PROVIDER,
   PROVIDER_NAME,
@@ -1746,6 +1915,7 @@ export {
   generationConfigFor,
   inject,
   name,
+  parseGeminiGroundingChunks,
   publicAccountId,
   readCredentialStore,
   readModelConfig,
