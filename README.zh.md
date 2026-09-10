@@ -12,6 +12,7 @@ DeepSeek Harness 自有、独立维护的 **Gemini (Google Antigravity / Cloud C
 - **模型白名单**：同一张设置卡里可按模型勾选 —— 勾选的才会出现在模型选择器；「全选 / 全不选」一键切换；持久化在 `$DSH_HOME/gemini-oauth-models.json`（未配置 = 全部可见）。
 - **代理自适应**：设置卡「网络」填 `host:port`（默认继承 `HTTPS_PROXY` / `ALL_PROXY`；`direct` 强制直连）。国内需要能出 Google。
 - **原生体验**：thinking（reasoning-delta）、流式输出、工具调用（functionDeclarations / functionCall）按 DSH 原生 chunk 协议映射；不注入厂商 system prompt。
+- **会话标题协议**：认 DSH `purpose: 'session-title'`。标题辅助请求强制 `thinkingLevel: LOW`，并把 `maxOutputTokens` 抬到至少 1024，避免 Gemini thinking 把官方 64 token 吃光、侧栏永远停在首句截断。
 - **图片输入**：Gemini 家族模型支持粘贴图片（经 DSH attachment 服务解析成 `inlineData` 发给 CCA）；PDF / 音频 / 视频等媒体类型暂未接入。
 - 凭据写在 `$DSH_HOME/gemini-oauth.json`（0600），自动 refresh，网络抖动刷新失败不丢凭据。
 - **多账号**：设置卡可保存多个 Google 账号（`$DSH_HOME/gemini-oauth.json` v2：`accounts[]` + `activeAccountId`），切换 / 移除账号，每个账号独立刷新与额度展示；新登录账号自动成为 active。旧版单账号文件读取时自动迁移为 v2。
@@ -54,6 +55,7 @@ host 插件要重启 `dsh web` 才加载新的 `index.js`。
 - **HTTP 400 "User location is not supported"**：Google 按出口 IP 限制地区（大陆不在支持列表；**支持国家 ≠ 该路径接受当前 IP**——G-Core/IDC 等机房 IP 会被间歇性拒绝，优先家宽/原生/住宅线路）。确认插件设置卡「网络」已填代理（如 `127.0.0.1:7897`）；该判定在 Google 侧偶发瞬时出现（几十秒到几分钟自愈），插件会在 daily 端点退避重试，最终报错时附当前代理出口 IP/ASN 诊断。
 - **图片输入报「需要 attachment 服务」**：附件服务是惰性解析的，首次请求即接入 `ctx.attachments`；若持续报错请确认 dsh web 已重启。
 - **工具调用后 400 "missing a thought_signature"**：工具闭环要求回传 `functionCall` 的 `thought_signature`（同一 provider+model 才有效）。插件会在流式输出时把签名存进块上并在下一轮回传；若自定义封装绕过了 DSH 的消息组装请确保保留了块上的 `thoughtSignature` 字段。
+- **侧栏标题停在首句截断**：官方标题服务会发一次 `purpose: 'session-title'` 的辅助请求（默认 64 token）。0.2.4 起本插件对该请求强制 LOW thinking 并抬高输出预算。旧会话不会自动回写，重启 `dsh web` 后新开的 Gemini 会话才会生效。
 
 ## 目录结构与开发
 

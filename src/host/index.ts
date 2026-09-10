@@ -42,7 +42,15 @@ import {
   writeModelConfig,
   resetModelConfig,
 } from "./store";
-import { runtimeModelId } from "./catalog";
+import {
+  runtimeModelId,
+  effortToThinkingLevel,
+  thinkingConfigFor,
+  resolveMaxOutputTokens,
+  generationConfigFor,
+  SESSION_TITLE_MIN_OUTPUT_TOKENS,
+} from "./catalog";
+import { buildRequest } from "./wire";
 import { GemOAuthAdapter, GemOAuthRuntime } from "./adapter";
 import { registerApiRoutes } from "./routes";
 import { getLoginSession, setLoginSession } from "./oauth";
@@ -134,6 +142,12 @@ export {
   PROVIDER_NAME,
   RUNTIME_MODEL_ALIASES,
   runtimeModelId,
+  effortToThinkingLevel,
+  thinkingConfigFor,
+  resolveMaxOutputTokens,
+  generationConfigFor,
+  SESSION_TITLE_MIN_OUTPUT_TOKENS,
+  buildRequest,
   readModelConfig,
   writeModelConfig,
   resetModelConfig,

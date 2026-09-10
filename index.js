@@ -503,6 +503,30 @@ function effortToThinkingLevel(effort) {
       return "MEDIUM";
   }
 }
+var SESSION_TITLE_MIN_OUTPUT_TOKENS = 1024;
+function isSessionTitleRequest(options) {
+  return options?.purpose === "session-title";
+}
+function thinkingConfigFor(modelId, options = {}) {
+  if (!modelId.endsWith("-tiered")) return void 0;
+  if (isSessionTitleRequest(options)) return { thinkingLevel: "LOW" };
+  return { thinkingLevel: effortToThinkingLevel(options.reasoningEffort) };
+}
+function resolveMaxOutputTokens(modelId, options = {}, modelMax) {
+  const cap = maxOutputTokensFor(modelId);
+  const ceiling = Math.min(Number(modelMax) || cap, cap);
+  const requested = options.maxTokens ?? ceiling;
+  const needed = isSessionTitleRequest(options) ? Math.max(requested, SESSION_TITLE_MIN_OUTPUT_TOKENS) : requested;
+  return Math.min(needed, ceiling);
+}
+function generationConfigFor(model, options = {}) {
+  const generationConfig = {
+    maxOutputTokens: resolveMaxOutputTokens(model.id, options, model.maxTokens ?? model.defaultMaxTokens)
+  };
+  const thinking = thinkingConfigFor(model.id, options);
+  if (thinking !== void 0) generationConfig.thinkingConfig = thinking;
+  return generationConfig;
+}
 function runtimeModelId(publicId) {
   return RUNTIME_MODEL_ALIASES[publicId] ?? publicId;
 }
@@ -517,181 +541,6 @@ async function fetchCatalog(fetchImpl, creds) {
   }
   return STATIC_CATALOG;
 }
-
-// src/host/adapter.ts
-init_constants();
-init_cca_client();
-import { LlmAdapter, LlmError as LlmError3 } from "@deepseek-ai/dsh-llm";
-init_store();
-
-// src/host/oauth.ts
-init_constants();
-init_store();
-import { randomBytes, createHash as createHash3 } from "node:crypto";
-import { createServer } from "node:http";
-import { spawn } from "node:child_process";
-var loginSession = void 0;
-function getLoginSession() {
-  return loginSession;
-}
-function setLoginSession(session) {
-  loginSession = session;
-}
-function isLoopbackAddress(address) {
-  return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
-}
-function openBrowser(url) {
-  try {
-    if (process.platform === "darwin") {
-      spawn("open", [url], { stdio: "ignore", detached: true }).unref();
-    } else if (process.platform === "win32") {
-      spawn("cmd", ["/c", "start", "", url], { stdio: "ignore", detached: true }).unref();
-    } else {
-      spawn("xdg-open", [url], { stdio: "ignore", detached: true }).unref();
-    }
-  } catch {
-  }
-}
-async function exchangeTokens(fetchImpl, params) {
-  const res = await fetchImpl(TOKEN_URL, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams(params)
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`token \u4EA4\u6362\u5931\u8D25 HTTP ${res.status}: ${body.slice(0, 300)}`);
-  }
-  return res.json();
-}
-async function refreshCredential(fetchImpl, creds) {
-  const { clientId, clientSecret } = clientConfig();
-  const tokens = await exchangeTokens(fetchImpl, {
-    client_id: clientId,
-    client_secret: clientSecret,
-    refresh_token: creds.refresh,
-    grant_type: "refresh_token"
-  });
-  return {
-    ...creds,
-    access: tokens.access_token,
-    refresh: typeof tokens.refresh_token === "string" ? tokens.refresh_token : creds.refresh,
-    expires: Date.now() + tokens.expires_in * 1e3 - 3e5
-  };
-}
-async function tryRefreshCredential(fetchImpl, creds) {
-  try {
-    const refreshed = await refreshCredential(fetchImpl, creds);
-    return { ok: true, creds: refreshed };
-  } catch (error) {
-    const text = error instanceof Error ? error.message : String(error);
-    const network = !/token(\s|%)?交换失败 HTTP (?:400|401|403)|invalid_grant|invalid_request/i.test(text);
-    return { ok: false, network, error };
-  }
-}
-async function startLoginFlow(fetchImpl, onAccountSuccess) {
-  if (loginSession !== void 0) {
-    return { authUrl: loginSession.authUrl };
-  }
-  const { clientId, clientSecret } = clientConfig();
-  const verifier = Buffer.from(randomBytes(32)).toString("base64url");
-  const challenge = Buffer.from(createHash3("sha256").update(verifier).digest()).toString("base64url");
-  const state = Buffer.from(randomBytes(24)).toString("base64url");
-  const port = Number(process.env.GEMINI_OAUTH_CALLBACK_PORT) || DEFAULT_CALLBACK_PORT;
-  const redirectUri = `http://localhost:${port}${REDIRECT_PATH}`;
-  let resolveCallback;
-  let rejectCallback;
-  const callbackDone = new Promise((resolve, reject) => {
-    resolveCallback = resolve;
-    rejectCallback = reject;
-  });
-  const server = createServer((req, res) => {
-    const url = new URL(req.url ?? "/", redirectUri);
-    if (url.pathname !== REDIRECT_PATH) {
-      res.writeHead(404).end();
-      return;
-    }
-    const code = url.searchParams.get("code");
-    if (url.searchParams.get("state") !== state || code === null) {
-      res.writeHead(400, { "content-type": "text/plain; charset=utf-8" }).end("OAuth \u56DE\u8C03\u6821\u9A8C\u5931\u8D25");
-      rejectCallback(new Error("OAuth state \u6216 code \u6821\u9A8C\u5931\u8D25"));
-      return;
-    }
-    res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end("<html><body><h2>Gemini OAuth \u767B\u5F55\u5B8C\u6210</h2>\u53EF\u4EE5\u5173\u95ED\u6B64\u9875\u3002</body></html>");
-    resolveCallback(code);
-  });
-  await new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(port, "127.0.0.1", () => resolve());
-  });
-  const authUrlObject = new URL(AUTH_URL);
-  authUrlObject.search = new URLSearchParams({
-    client_id: clientId,
-    response_type: "code",
-    redirect_uri: redirectUri,
-    scope: SCOPES.join(" "),
-    code_challenge: challenge,
-    code_challenge_method: "S256",
-    state,
-    access_type: "offline",
-    prompt: "consent"
-  }).toString();
-  const authUrl = authUrlObject.toString();
-  loginSession = { state, verifier, server, authUrl, status: "pending" };
-  openBrowser(authUrl);
-  void callbackDone.then(async (code) => {
-    try {
-      const tokens = await exchangeTokens(fetchImpl, {
-        client_id: clientId,
-        client_secret: clientSecret,
-        code,
-        grant_type: "authorization_code",
-        redirect_uri: redirectUri,
-        code_verifier: verifier
-      });
-      if (typeof tokens.refresh_token !== "string") throw new Error("OAuth \u672A\u8FD4\u56DE refresh token");
-      let email;
-      try {
-        const ui = await fetchImpl("https://www.googleapis.com/oauth2/v1/userinfo?alt=json", {
-          headers: { authorization: `Bearer ${tokens.access_token}` }
-        });
-        email = ui.ok ? (await ui.json()).email : void 0;
-      } catch {
-      }
-      const { discoverProject: discoverProject2, stableProjectId: stableProjectId2 } = await Promise.resolve().then(() => (init_cca_client(), cca_client_exports));
-      const projectId = await discoverProject2(fetchImpl, tokens.access_token) ?? stableProjectId2(email || "gemini-oauth-default");
-      const store = await readCredentialStore();
-      await writeCredentialStore(upsertAccount(store, {
-        access: tokens.access_token,
-        refresh: tokens.refresh_token,
-        expires: Date.now() + tokens.expires_in * 1e3 - 3e5,
-        projectId,
-        email
-      }));
-      onAccountSuccess?.();
-      if (loginSession) loginSession.status = "complete";
-    } catch (error) {
-      if (loginSession) {
-        loginSession.status = "error";
-        loginSession.error = error instanceof Error && error.message.length > 0 ? error.message : String(error);
-      }
-    }
-  }).catch(() => {
-  }).finally(() => {
-    setTimeout(() => {
-      loginSession?.server?.close();
-      loginSession = void 0;
-    }, 5e3);
-  });
-  return { authUrl };
-}
-
-// src/host/stream.ts
-init_constants();
-init_cca_client();
-init_store();
-import { randomUUID as randomUUID2 } from "node:crypto";
-import { LlmError as LlmError2, attributionHeaders } from "@deepseek-ai/dsh-llm";
 
 // src/host/wire.ts
 init_constants();
@@ -871,15 +720,7 @@ async function buildRequest(options, model, projectId, access, attachments, sign
   if (typeof options.system === "string" && options.system.length > 0) {
     request.systemInstruction = { role: "user", parts: [{ text: options.system }] };
   }
-  const generationConfig = {};
-  const cap = maxOutputTokensFor(model.id);
-  const modelMax = model.maxTokens ?? model.defaultMaxTokens ?? cap;
-  const maxOutput = Math.min(options.maxTokens ?? modelMax, Number(modelMax) || cap, cap);
-  generationConfig.maxOutputTokens = maxOutput;
-  if (model.id.endsWith("-tiered")) {
-    generationConfig.thinkingConfig = { thinkingLevel: effortToThinkingLevel(options.reasoningEffort) };
-  }
-  request.generationConfig = generationConfig;
+  request.generationConfig = generationConfigFor(model, options);
   const tools = buildTools(options);
   if (tools) request.tools = tools;
   if (options.sessionId) request.sessionId = String(options.sessionId);
@@ -893,7 +734,180 @@ async function buildRequest(options, model, projectId, access, attachments, sign
   };
 }
 
+// src/host/adapter.ts
+init_constants();
+init_cca_client();
+import { LlmAdapter, LlmError as LlmError3 } from "@deepseek-ai/dsh-llm";
+init_store();
+
+// src/host/oauth.ts
+init_constants();
+init_store();
+import { randomBytes, createHash as createHash3 } from "node:crypto";
+import { createServer } from "node:http";
+import { spawn } from "node:child_process";
+var loginSession = void 0;
+function getLoginSession() {
+  return loginSession;
+}
+function setLoginSession(session) {
+  loginSession = session;
+}
+function isLoopbackAddress(address) {
+  return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
+}
+function openBrowser(url) {
+  try {
+    if (process.platform === "darwin") {
+      spawn("open", [url], { stdio: "ignore", detached: true }).unref();
+    } else if (process.platform === "win32") {
+      spawn("cmd", ["/c", "start", "", url], { stdio: "ignore", detached: true }).unref();
+    } else {
+      spawn("xdg-open", [url], { stdio: "ignore", detached: true }).unref();
+    }
+  } catch {
+  }
+}
+async function exchangeTokens(fetchImpl, params) {
+  const res = await fetchImpl(TOKEN_URL, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(params)
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`token \u4EA4\u6362\u5931\u8D25 HTTP ${res.status}: ${body.slice(0, 300)}`);
+  }
+  return res.json();
+}
+async function refreshCredential(fetchImpl, creds) {
+  const { clientId, clientSecret } = clientConfig();
+  const tokens = await exchangeTokens(fetchImpl, {
+    client_id: clientId,
+    client_secret: clientSecret,
+    refresh_token: creds.refresh,
+    grant_type: "refresh_token"
+  });
+  return {
+    ...creds,
+    access: tokens.access_token,
+    refresh: typeof tokens.refresh_token === "string" ? tokens.refresh_token : creds.refresh,
+    expires: Date.now() + tokens.expires_in * 1e3 - 3e5
+  };
+}
+async function tryRefreshCredential(fetchImpl, creds) {
+  try {
+    const refreshed = await refreshCredential(fetchImpl, creds);
+    return { ok: true, creds: refreshed };
+  } catch (error) {
+    const text = error instanceof Error ? error.message : String(error);
+    const network = !/token(\s|%)?交换失败 HTTP (?:400|401|403)|invalid_grant|invalid_request/i.test(text);
+    return { ok: false, network, error };
+  }
+}
+async function startLoginFlow(fetchImpl, onAccountSuccess) {
+  if (loginSession !== void 0) {
+    return { authUrl: loginSession.authUrl };
+  }
+  const { clientId, clientSecret } = clientConfig();
+  const verifier = Buffer.from(randomBytes(32)).toString("base64url");
+  const challenge = Buffer.from(createHash3("sha256").update(verifier).digest()).toString("base64url");
+  const state = Buffer.from(randomBytes(24)).toString("base64url");
+  const port = Number(process.env.GEMINI_OAUTH_CALLBACK_PORT) || DEFAULT_CALLBACK_PORT;
+  const redirectUri = `http://localhost:${port}${REDIRECT_PATH}`;
+  let resolveCallback;
+  let rejectCallback;
+  const callbackDone = new Promise((resolve, reject) => {
+    resolveCallback = resolve;
+    rejectCallback = reject;
+  });
+  const server = createServer((req, res) => {
+    const url = new URL(req.url ?? "/", redirectUri);
+    if (url.pathname !== REDIRECT_PATH) {
+      res.writeHead(404).end();
+      return;
+    }
+    const code = url.searchParams.get("code");
+    if (url.searchParams.get("state") !== state || code === null) {
+      res.writeHead(400, { "content-type": "text/plain; charset=utf-8" }).end("OAuth \u56DE\u8C03\u6821\u9A8C\u5931\u8D25");
+      rejectCallback(new Error("OAuth state \u6216 code \u6821\u9A8C\u5931\u8D25"));
+      return;
+    }
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end("<html><body><h2>Gemini OAuth \u767B\u5F55\u5B8C\u6210</h2>\u53EF\u4EE5\u5173\u95ED\u6B64\u9875\u3002</body></html>");
+    resolveCallback(code);
+  });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, "127.0.0.1", () => resolve());
+  });
+  const authUrlObject = new URL(AUTH_URL);
+  authUrlObject.search = new URLSearchParams({
+    client_id: clientId,
+    response_type: "code",
+    redirect_uri: redirectUri,
+    scope: SCOPES.join(" "),
+    code_challenge: challenge,
+    code_challenge_method: "S256",
+    state,
+    access_type: "offline",
+    prompt: "consent"
+  }).toString();
+  const authUrl = authUrlObject.toString();
+  loginSession = { state, verifier, server, authUrl, status: "pending" };
+  openBrowser(authUrl);
+  void callbackDone.then(async (code) => {
+    try {
+      const tokens = await exchangeTokens(fetchImpl, {
+        client_id: clientId,
+        client_secret: clientSecret,
+        code,
+        grant_type: "authorization_code",
+        redirect_uri: redirectUri,
+        code_verifier: verifier
+      });
+      if (typeof tokens.refresh_token !== "string") throw new Error("OAuth \u672A\u8FD4\u56DE refresh token");
+      let email;
+      try {
+        const ui = await fetchImpl("https://www.googleapis.com/oauth2/v1/userinfo?alt=json", {
+          headers: { authorization: `Bearer ${tokens.access_token}` }
+        });
+        email = ui.ok ? (await ui.json()).email : void 0;
+      } catch {
+      }
+      const { discoverProject: discoverProject2, stableProjectId: stableProjectId2 } = await Promise.resolve().then(() => (init_cca_client(), cca_client_exports));
+      const projectId = await discoverProject2(fetchImpl, tokens.access_token) ?? stableProjectId2(email || "gemini-oauth-default");
+      const store = await readCredentialStore();
+      await writeCredentialStore(upsertAccount(store, {
+        access: tokens.access_token,
+        refresh: tokens.refresh_token,
+        expires: Date.now() + tokens.expires_in * 1e3 - 3e5,
+        projectId,
+        email
+      }));
+      onAccountSuccess?.();
+      if (loginSession) loginSession.status = "complete";
+    } catch (error) {
+      if (loginSession) {
+        loginSession.status = "error";
+        loginSession.error = error instanceof Error && error.message.length > 0 ? error.message : String(error);
+      }
+    }
+  }).catch(() => {
+  }).finally(() => {
+    setTimeout(() => {
+      loginSession?.server?.close();
+      loginSession = void 0;
+    }, 5e3);
+  });
+  return { authUrl };
+}
+
 // src/host/stream.ts
+init_constants();
+init_cca_client();
+init_store();
+import { randomUUID as randomUUID2 } from "node:crypto";
+import { LlmError as LlmError2, attributionHeaders } from "@deepseek-ai/dsh-llm";
 var CallId = (id) => id;
 function isJsonRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -1719,13 +1733,17 @@ export {
   PROVIDER,
   PROVIDER_NAME,
   RUNTIME_MODEL_ALIASES,
+  SESSION_TITLE_MIN_OUTPUT_TOKENS,
   accountKeyOf,
   activeAccountFrom,
   apply,
+  buildRequest,
   decodeCredentialStore,
   deleteCredentialStore,
+  effortToThinkingLevel,
   emptyStore,
   findAccountIndex,
+  generationConfigFor,
   inject,
   name,
   publicAccountId,
@@ -1733,9 +1751,11 @@ export {
   readModelConfig,
   removeAccount,
   resetModelConfig,
+  resolveMaxOutputTokens,
   runtimeModelId,
   storeFromLegacy,
   switchActiveAccount,
+  thinkingConfigFor,
   upsertAccount,
   writeCredentialStore,
   writeModelConfig

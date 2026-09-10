@@ -73,7 +73,7 @@ export function apply(ctx: any): void {
       {
         name: "conversation.composer.dock",
         id: "dsh-gemini-oauth-usage-dock",
-        order: -8,
+        order: -9,
         label: () => "Gemini OAuth",
       },
       (props: any) => <GeminiUsageChip {...props} seat="dock" ctx={ctx} />
@@ -85,7 +85,7 @@ export function apply(ctx: any): void {
       {
         name: "conversation.input.dock",
         id: "dsh-gemini-oauth-usage-hero",
-        order: 52,
+        order: 51,
         label: () => "Gemini OAuth",
       },
       (props: any) => <GeminiUsageChip {...props} seat="hero" ctx={ctx} />

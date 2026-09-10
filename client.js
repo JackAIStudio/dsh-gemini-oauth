@@ -999,7 +999,18 @@ function GeminiSettings({ ctx }) {
 var import_react3 = require("react");
 var import_jsx_runtime8 = require("react/jsx-runtime");
 function isBlankComposer(useSession) {
-  return typeof useSession === "function" && useSession((s) => s?.composerPhase) === "blank";
+  if (typeof document !== "undefined") {
+    const phase = document.querySelector("[data-phase]")?.getAttribute("data-phase");
+    if (phase === "hero" || phase === "settling") return true;
+    if (phase === "active") return false;
+  }
+  if (typeof useSession !== "function") return true;
+  const snap = useSession((s) => s);
+  if (snap && typeof snap === "object") {
+    if (snap.composerPhase === "blank") return true;
+    if (snap.blank === true && snap.promptAttempted !== true) return true;
+  }
+  return false;
 }
 function buildTooltip(quota, fetchedAt, t) {
   const buckets = geminiQuotaBuckets(quota);
@@ -1033,6 +1044,7 @@ function GeminiUsageChip(props) {
   const t = (0, import_react3.useMemo)(() => createTranslator(props.ctx), [props.ctx]);
   (0, import_react3.useEffect)(() => {
     startGlobalPolling();
+    if (sharedQuota === null) void pollQuota(true);
     const handler = () => bump((n) => n + 1);
     quotaListeners.add(handler);
     return () => {
@@ -1049,13 +1061,38 @@ function GeminiUsageChip(props) {
     return null;
   }
   const quota = sharedQuota;
-  if (!quota) return null;
+  if (!quota) {
+    if (sharedQuotaLoading) {
+      return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "dgo-usage-dock", children: /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(
+        "button",
+        {
+          type: "button",
+          className: "dgo-usage is-loading",
+          title: "Gemini \u989D\u5EA6\u67E5\u8BE2\u4E2D...",
+          "aria-label": "Gemini \u989D\u5EA6\u67E5\u8BE2\u4E2D...",
+          onMouseDown: (e) => e.preventDefault(),
+          onClick: (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            void pollQuota(true);
+          },
+          children: [
+            /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "dgo-usage-mark", children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(GeminiIcon, { size: 12 }) }),
+            /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "dgo-usage-amount", children: "..." })
+          ]
+        }
+      ) });
+    }
+    return null;
+  }
   const parsed = parseQuota(quota);
-  const primaryVal = parsed.geminiWeek !== null && parsed.gemini5h !== null ? Math.min(parsed.geminiWeek, parsed.gemini5h) : parsed.geminiWeek ?? parsed.gemini5h;
+  const primaryVal = parsed.gemini5h ?? parsed.geminiWeek;
   if (primaryVal === null || primaryVal === void 0) return null;
-  const isDanger = primaryVal < 10;
-  const isWarn = primaryVal < 25;
-  const displayText = isDanger ? `\u5468\u544A\u6025 (${primaryVal}%)` : `${primaryVal}% \u5269\u4F59`;
+  const isWeekDanger = parsed.geminiWeek !== null && parsed.geminiWeek < 10;
+  const is5hDanger = parsed.gemini5h !== null && parsed.gemini5h < 10;
+  const isDanger = isWeekDanger || is5hDanger;
+  const isWarn = parsed.gemini5h !== null && parsed.gemini5h < 25 || parsed.geminiWeek !== null && parsed.geminiWeek < 25;
+  const displayText = isWeekDanger ? `\u5468\u544A\u6025 (${parsed.geminiWeek}%)` : is5hDanger ? `\u544A\u6025 (${primaryVal}%)` : `${primaryVal}% \u5269\u4F59`;
   const loading = sharedQuotaLoading;
   const className = [
     "dgo-usage",
@@ -1070,7 +1107,12 @@ function GeminiUsageChip(props) {
       className,
       title: tooltipTitle,
       "aria-label": `Gemini ${displayText}`,
-      onClick: () => void pollQuota(true),
+      onMouseDown: (e) => e.preventDefault(),
+      onClick: (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        void pollQuota(true);
+      },
       children: [
         /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "dgo-usage-mark", children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(GeminiIcon, { size: 12 }) }),
         /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "dgo-usage-amount", children: displayText })
@@ -1144,7 +1186,7 @@ function apply(ctx) {
       {
         name: "conversation.composer.dock",
         id: "dsh-gemini-oauth-usage-dock",
-        order: -8,
+        order: -9,
         label: () => "Gemini OAuth"
       },
       (props) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(GeminiUsageChip, { ...props, seat: "dock", ctx })
@@ -1156,7 +1198,7 @@ function apply(ctx) {
       {
         name: "conversation.input.dock",
         id: "dsh-gemini-oauth-usage-hero",
-        order: 52,
+        order: 51,
         label: () => "Gemini OAuth"
       },
       (props) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(GeminiUsageChip, { ...props, seat: "hero", ctx })

@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { LlmError } from "@deepseek-ai/dsh-llm";
 import { PROVIDER } from "../common/constants";
 import type { ModelDescriptor } from "../common/types";
-import { effortToThinkingLevel, maxOutputTokensFor, runtimeModelId } from "./catalog";
+import { generationConfigFor, runtimeModelId } from "./catalog";
 
 // Cloud Code Assist 的 Gemini 线用 Protobuf JSON 严格反序列化工具 schema，
 // 只认下面这组键；$schema / $defs / $ref / additionalProperties 等任何其他
@@ -213,15 +213,7 @@ export async function buildRequest(
   if (typeof options.system === "string" && options.system.length > 0) {
     request.systemInstruction = { role: "user", parts: [{ text: options.system }] };
   }
-  const generationConfig: Record<string, any> = {};
-  const cap = maxOutputTokensFor(model.id);
-  const modelMax = model.maxTokens ?? model.defaultMaxTokens ?? cap;
-  const maxOutput = Math.min(options.maxTokens ?? modelMax, Number(modelMax) || cap, cap);
-  generationConfig.maxOutputTokens = maxOutput;
-  if (model.id.endsWith("-tiered")) {
-    generationConfig.thinkingConfig = { thinkingLevel: effortToThinkingLevel(options.reasoningEffort) };
-  }
-  request.generationConfig = generationConfig;
+  request.generationConfig = generationConfigFor(model, options);
   const tools = buildTools(options);
   if (tools) request.tools = tools;
   if (options.sessionId) request.sessionId = String(options.sessionId);

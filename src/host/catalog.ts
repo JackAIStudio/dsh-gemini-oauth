@@ -97,6 +97,53 @@ export function effortToThinkingLevel(effort?: string): "HIGH" | "MEDIUM" | "LOW
   }
 }
 
+/** DSH 标题辅助请求默认只有 64 可见 token；Gemini thinking 计入同一预算。 */
+export const SESSION_TITLE_MIN_OUTPUT_TOKENS = 1024;
+
+export function isSessionTitleRequest(options: { purpose?: string } | null | undefined): boolean {
+  return options?.purpose === "session-title";
+}
+
+/**
+ * `-tiered` 模型必须带 thinkingLevel。标题请求不能继承对话的 High/Medium：
+ * 思考会把官方 64 token 吃光，侧栏永远停在首句截断。CCA 没有真正的 off，
+ * 最低只能 LOW。
+ */
+export function thinkingConfigFor(
+  modelId: string,
+  options: { purpose?: string; reasoningEffort?: string } = {},
+): { thinkingLevel: "HIGH" | "MEDIUM" | "LOW" } | undefined {
+  if (!modelId.endsWith("-tiered")) return undefined;
+  if (isSessionTitleRequest(options)) return { thinkingLevel: "LOW" };
+  return { thinkingLevel: effortToThinkingLevel(options.reasoningEffort) };
+}
+
+export function resolveMaxOutputTokens(
+  modelId: string,
+  options: { purpose?: string; maxTokens?: number } = {},
+  modelMax?: number,
+): number {
+  const cap = maxOutputTokensFor(modelId);
+  const ceiling = Math.min(Number(modelMax) || cap, cap);
+  const requested = options.maxTokens ?? ceiling;
+  const needed = isSessionTitleRequest(options)
+    ? Math.max(requested, SESSION_TITLE_MIN_OUTPUT_TOKENS)
+    : requested;
+  return Math.min(needed, ceiling);
+}
+
+export function generationConfigFor(
+  model: { id: string; maxTokens?: number; defaultMaxTokens?: number },
+  options: { purpose?: string; reasoningEffort?: string; maxTokens?: number } = {},
+): Record<string, any> {
+  const generationConfig: Record<string, any> = {
+    maxOutputTokens: resolveMaxOutputTokens(model.id, options, model.maxTokens ?? model.defaultMaxTokens),
+  };
+  const thinking = thinkingConfigFor(model.id, options);
+  if (thinking !== undefined) generationConfig.thinkingConfig = thinking;
+  return generationConfig;
+}
+
 export function runtimeModelId(publicId: string): string {
   return RUNTIME_MODEL_ALIASES[publicId] ?? publicId;
 }

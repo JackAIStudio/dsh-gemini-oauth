@@ -23,7 +23,18 @@ export interface GeminiUsageChipProps {
 }
 
 function isBlankComposer(useSession: any): boolean {
-  return typeof useSession === "function" && useSession((s: any) => s?.composerPhase) === "blank";
+  if (typeof document !== "undefined") {
+    const phase = document.querySelector("[data-phase]")?.getAttribute("data-phase");
+    if (phase === "hero" || phase === "settling") return true;
+    if (phase === "active") return false;
+  }
+  if (typeof useSession !== "function") return true;
+  const snap = useSession((s: any) => s);
+  if (snap && typeof snap === "object") {
+    if (snap.composerPhase === "blank") return true;
+    if (snap.blank === true && snap.promptAttempted !== true) return true;
+  }
+  return false;
 }
 
 function buildTooltip(quota: QuotaSummary | null, fetchedAt: string | null, t: Translator): string {
@@ -59,6 +70,7 @@ export function GeminiUsageChip(props: GeminiUsageChipProps) {
 
   useEffect(() => {
     startGlobalPolling();
+    if (sharedQuota === null) void pollQuota(true);
     const handler = () => bump((n) => n + 1);
     quotaListeners.add(handler);
     return () => {
@@ -79,19 +91,50 @@ export function GeminiUsageChip(props: GeminiUsageChipProps) {
   }
 
   const quota = sharedQuota;
-  if (!quota) return null;
+  if (!quota) {
+    if (sharedQuotaLoading) {
+      return (
+        <div className="dgo-usage-dock">
+          <button
+            type="button"
+            className="dgo-usage is-loading"
+            title="Gemini 额度查询中..."
+            aria-label="Gemini 额度查询中..."
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              void pollQuota(true);
+            }}
+          >
+            <span className="dgo-usage-mark">
+              <GeminiIcon size={12} />
+            </span>
+            <span className="dgo-usage-amount">...</span>
+          </button>
+        </div>
+      );
+    }
+    return null;
+  }
 
   const parsed = parseQuota(quota);
-  const primaryVal =
-    parsed.geminiWeek !== null && parsed.gemini5h !== null
-      ? Math.min(parsed.geminiWeek, parsed.gemini5h)
-      : parsed.geminiWeek ?? parsed.gemini5h;
+  const primaryVal = parsed.gemini5h ?? parsed.geminiWeek;
 
   if (primaryVal === null || primaryVal === undefined) return null;
 
-  const isDanger = primaryVal < 10;
-  const isWarn = primaryVal < 25;
-  const displayText = isDanger ? `周告急 (${primaryVal}%)` : `${primaryVal}% 剩余`;
+  const isWeekDanger = parsed.geminiWeek !== null && parsed.geminiWeek < 10;
+  const is5hDanger = parsed.gemini5h !== null && parsed.gemini5h < 10;
+  const isDanger = isWeekDanger || is5hDanger;
+  const isWarn =
+    (parsed.gemini5h !== null && parsed.gemini5h < 25) ||
+    (parsed.geminiWeek !== null && parsed.geminiWeek < 25);
+
+  const displayText = isWeekDanger
+    ? `周告急 (${parsed.geminiWeek}%)`
+    : is5hDanger
+    ? `告急 (${primaryVal}%)`
+    : `${primaryVal}% 剩余`;
   const loading = sharedQuotaLoading;
 
   const className = [
@@ -111,7 +154,12 @@ export function GeminiUsageChip(props: GeminiUsageChipProps) {
         className={className}
         title={tooltipTitle}
         aria-label={`Gemini ${displayText}`}
-        onClick={() => void pollQuota(true)}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          void pollQuota(true);
+        }}
       >
         <span className="dgo-usage-mark">
           <GeminiIcon size={12} />
