@@ -112,15 +112,28 @@ export async function buildContents(
       const parts: any[] = [];
       const identity = modelIdentity(message);
       const isSameProviderAndModel = identity.provider === PROVIDER && identity.model === model.id;
+      const replayBlocks = Array.isArray(message.source?.replayState?.blocks)
+        ? message.source.replayState.blocks
+        : [];
+      let blockIndex = 0;
       for (const block of message.content ?? []) {
+        const replayBlock = replayBlocks[blockIndex] ?? {};
         if (block.type === "text") {
-          if (!block.text || block.text.trim() === "") continue;
-          const signature = resolvedThoughtSignature(isSameProviderAndModel, block.textSignature);
+          if (!block.text || block.text.trim() === "") {
+            blockIndex++;
+            continue;
+          }
+          const rawSig = replayBlock.textSignature ?? block.textSignature;
+          const signature = resolvedThoughtSignature(isSameProviderAndModel, rawSig);
           parts.push({ text: block.text, ...(signature ? { thoughtSignature: signature } : {}) });
         } else if (block.type === "reasoning") {
-          if (!block.text || block.text.trim() === "") continue;
+          if (!block.text || block.text.trim() === "") {
+            blockIndex++;
+            continue;
+          }
           if (isSameProviderAndModel) {
-            const signature = resolvedThoughtSignature(isSameProviderAndModel, block.thinkingSignature);
+            const rawSig = replayBlock.thinkingSignature ?? block.thinkingSignature;
+            const signature = resolvedThoughtSignature(isSameProviderAndModel, rawSig);
             parts.push({ thought: true, text: block.text, ...(signature ? { thoughtSignature: signature } : {}) });
           } else {
             parts.push({ text: block.text });
@@ -129,13 +142,15 @@ export async function buildContents(
           toolNames.set(block.id, block.name);
           let args = {};
           try { args = JSON.parse(block.arguments); } catch { /* 保底空对象 */ }
-          const signature = resolvedThoughtSignature(isSameProviderAndModel, block.thoughtSignature);
+          const rawSig = replayBlock.thoughtSignature ?? block.thoughtSignature;
+          const signature = resolvedThoughtSignature(isSameProviderAndModel, rawSig);
           const functionCall: Record<string, any> = { name: block.name, args };
           if (model.id.startsWith("claude-") || model.id.startsWith("gpt-oss-")) {
             functionCall.id = block.id;
           }
           parts.push({ ...(signature ? { thoughtSignature: signature } : {}), functionCall });
         }
+        blockIndex++;
       }
       push("model", parts);
       continue;

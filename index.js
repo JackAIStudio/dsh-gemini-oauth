@@ -629,15 +629,26 @@ async function buildContents(options, attachments, signal, model) {
       const parts2 = [];
       const identity = modelIdentity(message);
       const isSameProviderAndModel = identity.provider === PROVIDER && identity.model === model.id;
+      const replayBlocks = Array.isArray(message.source?.replayState?.blocks) ? message.source.replayState.blocks : [];
+      let blockIndex = 0;
       for (const block of message.content ?? []) {
+        const replayBlock = replayBlocks[blockIndex] ?? {};
         if (block.type === "text") {
-          if (!block.text || block.text.trim() === "") continue;
-          const signature = resolvedThoughtSignature(isSameProviderAndModel, block.textSignature);
+          if (!block.text || block.text.trim() === "") {
+            blockIndex++;
+            continue;
+          }
+          const rawSig = replayBlock.textSignature ?? block.textSignature;
+          const signature = resolvedThoughtSignature(isSameProviderAndModel, rawSig);
           parts2.push({ text: block.text, ...signature ? { thoughtSignature: signature } : {} });
         } else if (block.type === "reasoning") {
-          if (!block.text || block.text.trim() === "") continue;
+          if (!block.text || block.text.trim() === "") {
+            blockIndex++;
+            continue;
+          }
           if (isSameProviderAndModel) {
-            const signature = resolvedThoughtSignature(isSameProviderAndModel, block.thinkingSignature);
+            const rawSig = replayBlock.thinkingSignature ?? block.thinkingSignature;
+            const signature = resolvedThoughtSignature(isSameProviderAndModel, rawSig);
             parts2.push({ thought: true, text: block.text, ...signature ? { thoughtSignature: signature } : {} });
           } else {
             parts2.push({ text: block.text });
@@ -649,13 +660,15 @@ async function buildContents(options, attachments, signal, model) {
             args = JSON.parse(block.arguments);
           } catch {
           }
-          const signature = resolvedThoughtSignature(isSameProviderAndModel, block.thoughtSignature);
+          const rawSig = replayBlock.thoughtSignature ?? block.thoughtSignature;
+          const signature = resolvedThoughtSignature(isSameProviderAndModel, rawSig);
           const functionCall = { name: block.name, args };
           if (model.id.startsWith("claude-") || model.id.startsWith("gpt-oss-")) {
             functionCall.id = block.id;
           }
           parts2.push({ ...signature ? { thoughtSignature: signature } : {}, functionCall });
         }
+        blockIndex++;
       }
       push("model", parts2);
       continue;
@@ -963,7 +976,9 @@ async function* consumeSse(response, _model) {
   const decoder = new TextDecoder();
   let buffer = "";
   const blocks = [];
+  const replayBlocks = [];
   let current = void 0;
+  let currentReplay = void 0;
   let hasContent = false;
   let hasToolCall = false;
   let rawFinishReason = void 0;
@@ -971,9 +986,11 @@ async function* consumeSse(response, _model) {
   const closeCurrent = (out) => {
     if (current === void 0) return;
     const index = blocks.length - 1;
-    const block = current.type === "text" ? { type: "text", text: current.text, ...current.textSignature ? { textSignature: current.textSignature } : {} } : { type: "reasoning", text: current.text, ...current.thinkingSignature ? { thinkingSignature: current.thinkingSignature } : {} };
+    const block = { type: current.type, text: current.text };
+    replayBlocks[index] = currentReplay ?? { type: current.type };
     out.push({ type: "block-end", index, block });
     current = void 0;
+    currentReplay = void 0;
   };
   const consume = (chunk) => {
     const out = [];
@@ -988,14 +1005,15 @@ async function* consumeSse(response, _model) {
         if (current === void 0 || current.type !== blockType) {
           closeCurrent(out);
           current = { type: blockType, text: "" };
+          currentReplay = { type: blockType };
           blocks.push(current);
           out.push({ type: "block-start", index: blocks.length - 1, blockType });
         }
         const index = blocks.length - 1;
         current.text += part.text;
         if (isValidThoughtSignature(part.thoughtSignature)) {
-          if (reasoning) current.thinkingSignature = part.thoughtSignature;
-          else current.textSignature = part.thoughtSignature;
+          if (reasoning) currentReplay.thinkingSignature = part.thoughtSignature;
+          else currentReplay.textSignature = part.thoughtSignature;
         }
         hasContent = true;
         out.push({ type: reasoning ? "reasoning-delta" : "text-delta", index, text: part.text });
@@ -1012,7 +1030,10 @@ async function* consumeSse(response, _model) {
           type: "tool-call",
           id: CallId(toolId),
           name: toolName,
-          arguments: argsText,
+          arguments: argsText
+        };
+        replayBlocks[index] = {
+          type: "tool-call",
           ...signature ? { thoughtSignature: signature } : {}
         };
         blocks.push(block);
@@ -1078,7 +1099,16 @@ async function* consumeSse(response, _model) {
       }
     };
   }
-  yield { type: "finish", reason };
+  const replayState = {
+    response: {
+      kind: "gemini-oauth",
+      provider: PROVIDER,
+      model: _model.id,
+      stopReason: reason.kind
+    },
+    blocks: replayBlocks
+  };
+  yield { type: "finish", reason, replayState };
 }
 async function* streamChunks(fetchImpl, options, model, creds, attachments) {
   const accountId = publicAccountId(creds);

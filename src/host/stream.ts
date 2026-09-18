@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { LlmError, attributionHeaders } from "@deepseek-ai/dsh-llm";
 const CallId = (id: string) => id as any;
 import {
+  PROVIDER,
   ENDPOINTS,
   LOCATION_RETRY_PATTERN,
   TRANSIENT_BACKOFF_MS,
@@ -81,7 +82,9 @@ export async function* consumeSse(response: Response, _model: ModelDescriptor): 
   const decoder = new TextDecoder();
   let buffer = "";
   const blocks: any[] = [];
-  let current: any = undefined; // { type: 'text'|'reasoning', text, textSignature?, thinkingSignature? }
+  const replayBlocks: any[] = [];
+  let current: any = undefined; // { type: 'text'|'reasoning', text }
+  let currentReplay: any = undefined; // { type: 'text'|'reasoning', textSignature?, thinkingSignature? }
   let hasContent = false;
   let hasToolCall = false;
   let rawFinishReason: string | undefined = undefined;
@@ -90,11 +93,12 @@ export async function* consumeSse(response: Response, _model: ModelDescriptor): 
   const closeCurrent = (out: any[]) => {
     if (current === undefined) return;
     const index = blocks.length - 1;
-    const block = current.type === "text"
-      ? { type: "text", text: current.text, ...(current.textSignature ? { textSignature: current.textSignature } : {}) }
-      : { type: "reasoning", text: current.text, ...(current.thinkingSignature ? { thinkingSignature: current.thinkingSignature } : {}) };
+    // AST 块严格保持纯净（符合 DSH 官方封闭白名单），私有签名放入 replayBlocks 供下游重放
+    const block = { type: current.type, text: current.text };
+    replayBlocks[index] = currentReplay ?? { type: current.type };
     out.push({ type: "block-end", index, block });
     current = undefined;
+    currentReplay = undefined;
   };
 
   const consume = (chunk: any) => {
@@ -110,14 +114,15 @@ export async function* consumeSse(response: Response, _model: ModelDescriptor): 
         if (current === undefined || current.type !== blockType) {
           closeCurrent(out);
           current = { type: blockType, text: "" };
+          currentReplay = { type: blockType };
           blocks.push(current);
           out.push({ type: "block-start", index: blocks.length - 1, blockType });
         }
         const index = blocks.length - 1;
         current.text += part.text;
         if (isValidThoughtSignature(part.thoughtSignature)) {
-          if (reasoning) current.thinkingSignature = part.thoughtSignature;
-          else current.textSignature = part.thoughtSignature;
+          if (reasoning) currentReplay.thinkingSignature = part.thoughtSignature;
+          else currentReplay.textSignature = part.thoughtSignature;
         }
         hasContent = true;
         out.push({ type: reasoning ? "reasoning-delta" : "text-delta", index, text: part.text });
@@ -130,11 +135,16 @@ export async function* consumeSse(response: Response, _model: ModelDescriptor): 
         const argsText = JSON.stringify(args);
         const index = blocks.length;
         const signature = isValidThoughtSignature(part.thoughtSignature) ? part.thoughtSignature : undefined;
+        // AST 块严格保持官方标准字段，杜绝未知属性
         const block = {
           type: "tool-call",
           id: CallId(toolId),
           name: toolName,
           arguments: argsText,
+        };
+        // 私有思考签名放入对应的 replayBlocks 供下一轮请求回传
+        replayBlocks[index] = {
+          type: "tool-call",
           ...(signature ? { thoughtSignature: signature } : {}),
         };
         blocks.push(block);
@@ -203,7 +213,16 @@ export async function* consumeSse(response: Response, _model: ModelDescriptor): 
       },
     };
   }
-  yield { type: "finish", reason };
+  const replayState = {
+    response: {
+      kind: "gemini-oauth",
+      provider: PROVIDER,
+      model: _model.id,
+      stopReason: reason.kind,
+    },
+    blocks: replayBlocks,
+  };
+  yield { type: "finish", reason, replayState };
 }
 
 export async function* streamChunks(
