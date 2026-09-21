@@ -119,22 +119,18 @@ export function GeminiUsageChip(props: GeminiUsageChipProps) {
   }
 
   const parsed = parseQuota(quota);
-  const primaryVal = parsed.gemini5h ?? parsed.geminiWeek;
+  // 底部状态栏专注当前会话任务的核心指标：5小时窗口剩余
+  const val = parsed.gemini5h ?? parsed.geminiWeek;
 
-  if (primaryVal === null || primaryVal === undefined) return null;
+  if (val === null || val === undefined) return null;
 
-  const isWeekDanger = parsed.geminiWeek !== null && parsed.geminiWeek < 10;
-  const is5hDanger = parsed.gemini5h !== null && parsed.gemini5h < 10;
-  const isDanger = isWeekDanger || is5hDanger;
-  const isWarn =
-    (parsed.gemini5h !== null && parsed.gemini5h < 25) ||
-    (parsed.geminiWeek !== null && parsed.geminiWeek < 25);
+  // 告急与警告状态完全基于 5 小时窗口，不因周限额变动抢占或变色
+  const isDanger = val < 10;
+  const isWarn = val < 25;
 
-  const displayText = isWeekDanger
-    ? `周告急 (${parsed.geminiWeek}%)`
-    : is5hDanger
-    ? `告急 (${primaryVal}%)`
-    : `${primaryVal}% 剩余`;
+  const displayText = isDanger
+    ? (t("quotaDanger", { val }) || `告急 (${val}%)`)
+    : (t("quotaRemaining", { val }) || `${val}% 剩余`);
   const loading = sharedQuotaLoading;
 
   const className = [

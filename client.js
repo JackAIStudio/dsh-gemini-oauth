@@ -50,6 +50,7 @@ var zh = {
   accountSwitched: "\u5DF2\u5207\u6362\u5230 {email}",
   quotaFailed: "\u989D\u5EA6\u8BFB\u53D6\u5931\u8D25",
   quotaRemaining: "{val}% \u5269\u4F59",
+  quotaDanger: "\u544A\u6025 ({val}%)",
   quotaWeekly: "\u6BCF\u5468\u5269\u4F59",
   quotaFiveHour: "\u6BCF 5 \u5C0F\u65F6\u5269\u4F59",
   loading: "\u52A0\u8F7D\u4E2D...",
@@ -101,6 +102,7 @@ var en = {
   accountSwitched: "Switched to {email}",
   quotaFailed: "Quota unavailable",
   quotaRemaining: "{val}% left",
+  quotaDanger: "Low ({val}%)",
   quotaWeekly: "Weekly remaining",
   quotaFiveHour: "5-hour remaining",
   loading: "Loading...",
@@ -1086,13 +1088,11 @@ function GeminiUsageChip(props) {
     return null;
   }
   const parsed = parseQuota(quota);
-  const primaryVal = parsed.gemini5h ?? parsed.geminiWeek;
-  if (primaryVal === null || primaryVal === void 0) return null;
-  const isWeekDanger = parsed.geminiWeek !== null && parsed.geminiWeek < 10;
-  const is5hDanger = parsed.gemini5h !== null && parsed.gemini5h < 10;
-  const isDanger = isWeekDanger || is5hDanger;
-  const isWarn = parsed.gemini5h !== null && parsed.gemini5h < 25 || parsed.geminiWeek !== null && parsed.geminiWeek < 25;
-  const displayText = isWeekDanger ? `\u5468\u544A\u6025 (${parsed.geminiWeek}%)` : is5hDanger ? `\u544A\u6025 (${primaryVal}%)` : `${primaryVal}% \u5269\u4F59`;
+  const val = parsed.gemini5h ?? parsed.geminiWeek;
+  if (val === null || val === void 0) return null;
+  const isDanger = val < 10;
+  const isWarn = val < 25;
+  const displayText = isDanger ? t("quotaDanger", { val }) || `\u544A\u6025 (${val}%)` : t("quotaRemaining", { val }) || `${val}% \u5269\u4F59`;
   const loading = sharedQuotaLoading;
   const className = [
     "dgo-usage",
