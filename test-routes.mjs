@@ -9,6 +9,11 @@ import { apply, writeCredentialStore, emptyStore, upsertAccount } from "./index.
 const tmpHome = mkdtempSync(join(tmpdir(), "gemini-routes-test-"));
 process.env.GEMINI_TEST_HOME = tmpHome;
 
+import { credentialPath } from "./index.js";
+if (!credentialPath().startsWith(tmpHome)) {
+  throw new Error(`CRITICAL TEST ISOLATION FAILURE: credentialPath (${credentialPath()}) does not start with tmpHome (${tmpHome})! Aborting to prevent wiping user credentials.`);
+}
+
 const now = Date.now();
 const FAT = now + 24 * 3600_000; // 远未来,测试中不触发刷新
 
@@ -19,8 +24,53 @@ const jsonRes = (status, value) => ({
   text: async () => JSON.stringify(value),
   json: async () => value,
 });
-const fetchMock = async (input) => {
+const fetchMock = async (input, init) => {
   const url = typeof input === "string" ? input : input.url;
+  const auth = init?.headers?.authorization || init?.headers?.Authorization || "";
+  if (url.includes("/v1internal:loadCodeAssist") && auth.includes("at-managed")) {
+    return jsonRes(200, { gcpManaged: true, antigravityProjectId: "proj-managed" });
+  }
+  if (url.includes("/v1internal:loadCodeAssist") && auth.includes("at-split")) {
+    return jsonRes(200, { gcpManaged: false, antigravityProjectId: "aicode-consumers" });
+  }
+  if (url.includes("retrieveUserQuotaSummary") && (auth.includes("at-split") || auth.includes("at-managed"))) {
+    if (url.includes("daily-cloudcode-pa")) {
+      return jsonRes(403, {
+        error: {
+          code: 403,
+          message: "Verify your account to continue.",
+          status: "PERMISSION_DENIED",
+          details: [{
+            "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+            reason: "VALIDATION_REQUIRED",
+            domain: "cloudcode-pa.googleapis.com",
+            metadata: { validation_url: "https://accounts.google.com/signin/continue?continue=https%3A%2F%2Fexample.test%2Fok" },
+          }],
+        },
+      });
+    }
+    return jsonRes(200, {
+      groups: [{
+        displayName: "Gemini Models",
+        buckets: [{ displayName: "Weekly Limit Remaining", bucketId: "gemini-weekly", remainingFraction: 1, resetTime: "2099-01-01T00:00:00Z" }],
+      }],
+    });
+  }
+  if (url.includes("retrieveUserQuotaSummary") && auth.includes("at-locked")) {
+    return jsonRes(403, {
+      error: {
+        code: 403,
+        message: "Verify your account to continue.",
+        status: "PERMISSION_DENIED",
+        details: [{
+          "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+          reason: "VALIDATION_REQUIRED",
+          domain: "cloudcode-pa.googleapis.com",
+          metadata: { validation_url: "https://accounts.google.com/signin/continue?continue=https%3A%2F%2Fexample.test%2Fok" },
+        }],
+      },
+    });
+  }
   if (url.includes("oauth2.googleapis.com/token")) {
     return jsonRes(200, { access_token: "at-fresh", refresh_token: "rt-fresh", expires_in: 3600 });
   }
@@ -213,6 +263,52 @@ await check("logout 全部移除后 authenticated=false", async () => {
   assert.equal(r.value.accounts.length, 0);
   const status = await callApi("/gemini-oauth/api/status");
   assert.equal(status.value.authenticated, false);
+});
+
+await check("额度 403 VALIDATION_REQUIRED 不再伪装成暂无额度", async () => {
+  await writeCredentialStore(upsertAccount(
+    upsertAccount(emptyStore(), {
+      access: "at-ok", refresh: "rt-ok", expires: FAT,
+      projectId: "proj-ok", email: "ok@test.com",
+    }, true),
+    {
+      access: "at-locked", refresh: "rt-locked", expires: FAT,
+      projectId: "proj-locked", email: "locked@test.com",
+    }, false));
+  const all = await callApi("/gemini-oauth/api/quota-all", "POST", undefined);
+  assert.equal(all.ok, true);
+  const ok = all.value.accounts.find((a) => a.accountId === "ok@test.com");
+  const locked = all.value.accounts.find((a) => a.accountId === "locked@test.com");
+  assert.equal(ok.status, "ok");
+  assert.equal(locked.status, "error");
+  assert.match(locked.message, /验证这个账号/);
+  assert.equal(locked.validationUrl, "https://accounts.google.com/signin/continue?continue=https%3A%2F%2Fexample.test%2Fok");
+  assert.equal(locked.quota, undefined);
+});
+
+await check("个人账号不展示 cloudcode-pa 上用不到的 100% 额度", async () => {
+  await writeCredentialStore(upsertAccount(emptyStore(), {
+    access: "at-split", refresh: "rt-split", expires: FAT,
+    projectId: "aicode-consumers", email: "split@test.com",
+  }, true));
+  const all = await callApi("/gemini-oauth/api/quota-all", "POST", undefined);
+  assert.equal(all.ok, true);
+  const split = all.value.accounts.find((a) => a.accountId === "split@test.com");
+  assert.equal(split.status, "error");
+  assert.match(split.message, /验证这个账号/);
+  assert.equal(split.quota, undefined);
+});
+
+await check("企业账号仍可回退到 cloudcode-pa 的额度", async () => {
+  await writeCredentialStore(upsertAccount(emptyStore(), {
+    access: "at-managed", refresh: "rt-managed", expires: FAT,
+    projectId: "proj-managed", email: "managed@test.com",
+  }, true));
+  const all = await callApi("/gemini-oauth/api/quota-all", "POST", undefined);
+  assert.equal(all.ok, true);
+  const managed = all.value.accounts.find((a) => a.accountId === "managed@test.com");
+  assert.equal(managed.status, "ok");
+  assert.equal(managed.quota.groups[0].buckets[0].remainingFraction, 1);
 });
 
 await check("非本机 remoteAddress 拒绝 403", async () => {

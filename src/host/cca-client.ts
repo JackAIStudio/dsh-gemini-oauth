@@ -3,7 +3,7 @@
 import { createHash } from "node:crypto";
 import { ENDPOINTS, PROJECT_CACHE_TTL_MS, ACCOUNT_PROFILE_TTL_MS } from "../common/constants";
 import type { AccountRecord, QuotaSummary } from "../common/types";
-import { safeJson } from "./store";
+import { publicAccountId, safeJson } from "./store";
 import type { EgressInfo, FetchJsonResult } from "./types";
 
 export function ccaHeaders(token: string): Record<string, string> {
@@ -153,10 +153,76 @@ export async function egressDiagnostic(fetchImpl: typeof fetch): Promise<EgressI
   }
 }
 
+export class CcaApiError extends Error {
+  validationUrl?: string;
+
+  constructor(message: string, validationUrl?: string) {
+    super(message);
+    this.name = "CcaApiError";
+    if (validationUrl) this.validationUrl = validationUrl;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, any> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function validationRequired(details: unknown[]): boolean {
+  return details.some((detail) => isRecord(detail) && detail.reason === "VALIDATION_REQUIRED");
+}
+
+function validationUrlFrom(details: unknown[]): string | undefined {
+  if (!validationRequired(details)) return undefined;
+  for (const detail of details) {
+    if (!isRecord(detail)) continue;
+    const metadata = isRecord(detail.metadata) ? detail.metadata : undefined;
+    if (typeof metadata?.validation_url === "string" && metadata.validation_url.startsWith("https://")) {
+      return metadata.validation_url;
+    }
+  }
+  for (const detail of details) {
+    if (!isRecord(detail) || !Array.isArray(detail.links)) continue;
+    for (const link of detail.links) {
+      if (isRecord(link) && typeof link.url === "string" && link.url.startsWith("https://accounts.google.com/")) {
+        return link.url;
+      }
+    }
+  }
+  return undefined;
+}
+
+// 非 2xx 不能当成「没有额度」。VALIDATION_REQUIRED 是 Google 账号验证门，
+// 登录能成功，但模型和额度都会 403，直到用户打开 validation_url。
+export function ccaFailureDetail(status: number, text: string): { message: string; validationUrl?: string } {
+  const parsed = safeJson(text);
+  const error = isRecord(parsed) && isRecord(parsed.error) ? parsed.error : undefined;
+  const googleMessage = typeof error?.message === "string" && error.message.length > 0
+    ? error.message
+    : (text.trim().length > 0 ? text.trim().slice(0, 200) : `HTTP ${status}`);
+  const details = Array.isArray(error?.details) ? error.details : [];
+  if (!validationRequired(details)) return { message: googleMessage };
+  const validationUrl = validationUrlFrom(details);
+  return {
+    ...(validationUrl ? { validationUrl } : {}),
+    message: validationUrl
+      ? `Google 要求先验证这个账号才能使用模型和额度（${googleMessage}）。请用该账号打开验证链接：${validationUrl}`
+      : `Google 要求先验证这个账号才能使用模型和额度（${googleMessage}）。`,
+  };
+}
+
 export async function fetchQuota(fetchImpl: typeof fetch, creds: AccountRecord): Promise<QuotaSummary | undefined> {
-  for (const endpoint of ENDPOINTS) {
+  // 额度必须和对话走同一组端点。个人账号对话只用 daily；cloudcode-pa 的
+  // retrieveUserQuotaSummary 仍可能回 100%，但 streamGenerateContent 恒 429。
+  // 把那份额度画出来，就会出现「每 5 小时还有剩余，实际用不了」。
+  const gcpManaged = await resolveAccountProfile(fetchImpl, creds.access, publicAccountId(creds));
+  const endpoints = gcpManaged ? ENDPOINTS : [ENDPOINTS[0]];
+  let last: { message: string; validationUrl?: string } | undefined;
+  for (const endpoint of endpoints) {
     const r = await postJson<QuotaSummary>(fetchImpl, endpoint, "/v1internal:retrieveUserQuotaSummary", creds.access, {});
     if (r.ok && r.json) return r.json;
+    const detail = ccaFailureDetail(r.status, r.text);
+    if (last === undefined || detail.validationUrl) last = detail;
   }
+  if (last) throw new CcaApiError(last.message, last.validationUrl);
   return undefined;
 }

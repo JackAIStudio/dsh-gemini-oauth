@@ -64,6 +64,7 @@ export function installStyle(): void {
 .dgo-active-badge{display:inline-flex;align-items:center;font-size:12px;line-height:16px;font-weight:650;color:#059669;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:999px;padding:1px 8px}
 .dgo-account-caption{font-size:12px;line-height:16px;color:#8b93a1}
 .dgo-account-caption-error{color:#dc2626}
+.dgo-verify-link{color:#dc2626;font-weight:650;text-decoration:underline}
 .dgo-account-actions{display:flex;gap:6px;flex:none;flex-wrap:wrap;justify-content:flex-end}
 .dgo-accounts-help{margin-top:10px;color:#8b93a1;font-size:12px;line-height:18px}
 .dgo-accounts-empty{border:1px dashed #d8dee8;border-radius:10px;padding:14px;color:#747f90;background:#fafbfc;font-size:13px;line-height:20px}

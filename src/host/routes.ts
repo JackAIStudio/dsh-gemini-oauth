@@ -10,7 +10,7 @@ import type {
   SettingsView,
   StatusView,
 } from "../common/types";
-import { fetchQuota } from "./cca-client";
+import { CcaApiError, fetchQuota } from "./cca-client";
 import { getLoginSession, isLoopbackAddress, startLoginFlow, tryRefreshCredential } from "./oauth";
 import {
   activeAccountFrom,
@@ -259,7 +259,13 @@ export function registerApiRoutes(ctx: any, runtime: GemOAuthRuntime, ns: any): 
         results.push({ ...base, status: "ok", quota: quota ?? null });
       } catch (error) {
         const message = error instanceof Error && error.message.length > 0 ? error.message : "额度读取失败";
-        results.push({ ...base, status: "error", message: redactSecrets(message, account, current) });
+        const validationUrl = error instanceof CcaApiError ? error.validationUrl : undefined;
+        results.push({
+          ...base,
+          status: "error",
+          message: redactSecrets(message, account, current),
+          ...(validationUrl ? { validationUrl: redactSecrets(validationUrl, account, current) } : {}),
+        });
       }
       if (signal?.aborted) break;
     }

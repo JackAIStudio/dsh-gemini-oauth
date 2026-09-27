@@ -49,6 +49,8 @@ var zh = {
   removeFailed: "\u79FB\u9664\u8D26\u53F7\u5931\u8D25",
   accountSwitched: "\u5DF2\u5207\u6362\u5230 {email}",
   quotaFailed: "\u989D\u5EA6\u8BFB\u53D6\u5931\u8D25",
+  verifyAccount: "Google \u8981\u6C42\u5148\u9A8C\u8BC1\u8FD9\u4E2A\u8D26\u53F7\u3002\u9A8C\u8BC1\u5B8C\u6210\u524D\u4E0D\u80FD\u8C03\u7528\u6A21\u578B\uFF0C\u4E5F\u8BFB\u4E0D\u5230\u989D\u5EA6\u3002",
+  verifyAccountAction: "\u53BB\u9A8C\u8BC1",
   quotaRemaining: "{val}% \u5269\u4F59",
   quotaDanger: "\u544A\u6025 ({val}%)",
   quotaWeekly: "\u6BCF\u5468\u5269\u4F59",
@@ -101,6 +103,8 @@ var en = {
   removeFailed: "Failed to remove account",
   accountSwitched: "Switched to {email}",
   quotaFailed: "Quota unavailable",
+  verifyAccount: "Google must verify this account before it can be used. Quota stays empty until then.",
+  verifyAccountAction: "Verify",
   quotaRemaining: "{val}% left",
   quotaDanger: "Low ({val}%)",
   quotaWeekly: "Weekly remaining",
@@ -223,6 +227,7 @@ function installStyle() {
 .dgo-active-badge{display:inline-flex;align-items:center;font-size:12px;line-height:16px;font-weight:650;color:#059669;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:999px;padding:1px 8px}
 .dgo-account-caption{font-size:12px;line-height:16px;color:#8b93a1}
 .dgo-account-caption-error{color:#dc2626}
+.dgo-verify-link{color:#dc2626;font-weight:650;text-decoration:underline}
 .dgo-account-actions{display:flex;gap:6px;flex:none;flex-wrap:wrap;justify-content:flex-end}
 .dgo-accounts-help{margin-top:10px;color:#8b93a1;font-size:12px;line-height:18px}
 .dgo-accounts-empty{border:1px dashed #d8dee8;border-radius:10px;padding:14px;color:#747f90;background:#fafbfc;font-size:13px;line-height:20px}
@@ -561,7 +566,11 @@ function AccountList({ accounts, quotaAll, activeQuota, busy, onSwitch, onRemove
             ] }),
             /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "dgo-account-meta", children: [
               account.active && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "dgo-active-badge", children: t("accountActive") }),
-              entry?.status === "error" && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "dgo-account-caption dgo-account-caption-error", children: `${t("quotaFailed")}\uFF1A${entry.message ?? ""}` }),
+              entry?.status === "error" && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "dgo-account-caption dgo-account-caption-error", children: entry.validationUrl ? /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(import_jsx_runtime4.Fragment, { children: [
+                t("verifyAccount"),
+                " ",
+                /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("a", { className: "dgo-verify-link", href: entry.validationUrl, target: "_blank", rel: "noreferrer", children: t("verifyAccountAction") })
+              ] }) : `${t("quotaFailed")}\uFF1A${entry.message ?? ""}` }),
               waiting && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "dgo-account-caption", children: t("fetchingQuota") }),
               entry?.status === "ok" && !geminiQuota && !waiting && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "dgo-account-caption", children: t("noQuotaDesc") })
             ] })

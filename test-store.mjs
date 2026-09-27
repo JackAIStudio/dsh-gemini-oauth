@@ -15,6 +15,7 @@ import {
   activeAccountFrom,
   findAccountIndex,
   emptyStore,
+  credentialPath,
   readCredentialStore,
   writeCredentialStore,
   deleteCredentialStore,
@@ -175,6 +176,10 @@ check("v2 decode：空账号数组", () => {
 // ---- 文件读写（tmp home，不碰真实凭据）----
 const tmpHome = mkdtempSync(join(tmpdir(), "gemini-store-test-"));
 process.env.GEMINI_TEST_HOME = tmpHome;
+
+if (!credentialPath().startsWith(tmpHome)) {
+  throw new Error(`CRITICAL TEST ISOLATION FAILURE: credentialPath (${credentialPath()}) does not start with tmpHome (${tmpHome})! Aborting to prevent wiping user credentials.`);
+}
 
 async function checkAsync(name, fn) {
   try {

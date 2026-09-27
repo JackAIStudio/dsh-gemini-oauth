@@ -59,7 +59,15 @@ export function AccountList({ accounts, quotaAll, activeQuota, busy, onSwitch, o
                   {account.active && <span className="dgo-active-badge">{t("accountActive")}</span>}
                   {entry?.status === "error" && (
                     <span className="dgo-account-caption dgo-account-caption-error">
-                      {`${t("quotaFailed")}：${entry.message ?? ""}`}
+                      {entry.validationUrl ? (
+                        <>
+                          {t("verifyAccount")}
+                          {" "}
+                          <a className="dgo-verify-link" href={entry.validationUrl} target="_blank" rel="noreferrer">
+                            {t("verifyAccountAction")}
+                          </a>
+                        </>
+                      ) : `${t("quotaFailed")}：${entry.message ?? ""}`}
                     </span>
                   )}
                   {waiting && <span className="dgo-account-caption">{t("fetchingQuota")}</span>}

@@ -13,6 +13,7 @@ import {
 } from "../common/constants";
 import type { AccountRecord, ModelDescriptor } from "../common/types";
 import {
+  ccaFailureDetail,
   ccaHeaders,
   egressDiagnostic,
   projectForEndpoint,
@@ -49,6 +50,8 @@ export function sleepMs(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 export function friendlyError(status: number, text: string): string {
+  const detail = ccaFailureDetail(status, text);
+  if (detail.validationUrl) return detail.message;
   const parsed = safeJson(text);
   if (isJsonRecord(parsed) && isJsonRecord(parsed.error) && typeof parsed.error.message === "string") {
     const details = parsed.error.details;

@@ -2,7 +2,7 @@
 
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, unlink, writeFile, chmod } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { dshHomePath } from "@deepseek-ai/dsh-home-paths";
 import {
   CREDENTIAL_FILENAME,
@@ -15,6 +15,9 @@ import type { AccountRecord, CredentialStore } from "../common/types";
 import type { ClientCredentialsConfig, ModelConfigData } from "./types";
 
 export function credentialPath(): string {
+  if (process.env.GEMINI_TEST_HOME) {
+    return join(process.env.GEMINI_TEST_HOME, CREDENTIAL_FILENAME);
+  }
   return dshHomePath(CREDENTIAL_FILENAME);
 }
 
@@ -221,6 +224,9 @@ export async function deleteCredentialStore(): Promise<void> {
 // 模型可见性白名单：$DSH_HOME/gemini-oauth-models.json
 // ---------------------------------------------------------------------------
 export function modelConfigPath(): string {
+  if (process.env.GEMINI_TEST_HOME) {
+    return join(process.env.GEMINI_TEST_HOME, MODEL_CONFIG_FILENAME);
+  }
   return dshHomePath(MODEL_CONFIG_FILENAME);
 }
 

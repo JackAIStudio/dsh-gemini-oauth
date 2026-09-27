@@ -90,6 +90,7 @@ export interface AccountQuotaResult {
   status: "ok" | "error";
   quota?: QuotaSummary | null;
   message?: string;
+  validationUrl?: string;
 }
 
 export interface QuotaAllView {

@@ -66,9 +66,12 @@ var init_constants = __esm({
 // src/host/store.ts
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, unlink, writeFile, chmod } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { dshHomePath } from "@deepseek-ai/dsh-home-paths";
 function credentialPath() {
+  if (process.env.GEMINI_TEST_HOME) {
+    return join(process.env.GEMINI_TEST_HOME, CREDENTIAL_FILENAME);
+  }
   return dshHomePath(CREDENTIAL_FILENAME);
 }
 function clientConfig() {
@@ -238,6 +241,9 @@ async function deleteCredentialStore() {
   });
 }
 function modelConfigPath() {
+  if (process.env.GEMINI_TEST_HOME) {
+    return join(process.env.GEMINI_TEST_HOME, MODEL_CONFIG_FILENAME);
+  }
   return dshHomePath(MODEL_CONFIG_FILENAME);
 }
 async function readModelConfig() {
@@ -271,7 +277,9 @@ var init_store = __esm({
 // src/host/cca-client.ts
 var cca_client_exports = {};
 __export(cca_client_exports, {
+  CcaApiError: () => CcaApiError,
   accountProfileCache: () => accountProfileCache,
+  ccaFailureDetail: () => ccaFailureDetail,
   ccaHeaders: () => ccaHeaders,
   discoverProject: () => discoverProject,
   egressDiagnostic: () => egressDiagnostic,
@@ -395,20 +403,71 @@ async function egressDiagnostic(fetchImpl) {
     return void 0;
   }
 }
-async function fetchQuota(fetchImpl, creds) {
-  for (const endpoint of ENDPOINTS) {
-    const r = await postJson(fetchImpl, endpoint, "/v1internal:retrieveUserQuotaSummary", creds.access, {});
-    if (r.ok && r.json) return r.json;
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function validationRequired(details) {
+  return details.some((detail) => isRecord(detail) && detail.reason === "VALIDATION_REQUIRED");
+}
+function validationUrlFrom(details) {
+  if (!validationRequired(details)) return void 0;
+  for (const detail of details) {
+    if (!isRecord(detail)) continue;
+    const metadata = isRecord(detail.metadata) ? detail.metadata : void 0;
+    if (typeof metadata?.validation_url === "string" && metadata.validation_url.startsWith("https://")) {
+      return metadata.validation_url;
+    }
+  }
+  for (const detail of details) {
+    if (!isRecord(detail) || !Array.isArray(detail.links)) continue;
+    for (const link of detail.links) {
+      if (isRecord(link) && typeof link.url === "string" && link.url.startsWith("https://accounts.google.com/")) {
+        return link.url;
+      }
+    }
   }
   return void 0;
 }
-var projectCache, accountProfileCache;
+function ccaFailureDetail(status, text) {
+  const parsed = safeJson(text);
+  const error = isRecord(parsed) && isRecord(parsed.error) ? parsed.error : void 0;
+  const googleMessage = typeof error?.message === "string" && error.message.length > 0 ? error.message : text.trim().length > 0 ? text.trim().slice(0, 200) : `HTTP ${status}`;
+  const details = Array.isArray(error?.details) ? error.details : [];
+  if (!validationRequired(details)) return { message: googleMessage };
+  const validationUrl = validationUrlFrom(details);
+  return {
+    ...validationUrl ? { validationUrl } : {},
+    message: validationUrl ? `Google \u8981\u6C42\u5148\u9A8C\u8BC1\u8FD9\u4E2A\u8D26\u53F7\u624D\u80FD\u4F7F\u7528\u6A21\u578B\u548C\u989D\u5EA6\uFF08${googleMessage}\uFF09\u3002\u8BF7\u7528\u8BE5\u8D26\u53F7\u6253\u5F00\u9A8C\u8BC1\u94FE\u63A5\uFF1A${validationUrl}` : `Google \u8981\u6C42\u5148\u9A8C\u8BC1\u8FD9\u4E2A\u8D26\u53F7\u624D\u80FD\u4F7F\u7528\u6A21\u578B\u548C\u989D\u5EA6\uFF08${googleMessage}\uFF09\u3002`
+  };
+}
+async function fetchQuota(fetchImpl, creds) {
+  const gcpManaged = await resolveAccountProfile(fetchImpl, creds.access, publicAccountId(creds));
+  const endpoints = gcpManaged ? ENDPOINTS : [ENDPOINTS[0]];
+  let last;
+  for (const endpoint of endpoints) {
+    const r = await postJson(fetchImpl, endpoint, "/v1internal:retrieveUserQuotaSummary", creds.access, {});
+    if (r.ok && r.json) return r.json;
+    const detail = ccaFailureDetail(r.status, r.text);
+    if (last === void 0 || detail.validationUrl) last = detail;
+  }
+  if (last) throw new CcaApiError(last.message, last.validationUrl);
+  return void 0;
+}
+var projectCache, accountProfileCache, CcaApiError;
 var init_cca_client = __esm({
   "src/host/cca-client.ts"() {
     init_constants();
     init_store();
     projectCache = /* @__PURE__ */ new Map();
     accountProfileCache = /* @__PURE__ */ new Map();
+    CcaApiError = class extends Error {
+      validationUrl;
+      constructor(message, validationUrl) {
+        super(message);
+        this.name = "CcaApiError";
+        if (validationUrl) this.validationUrl = validationUrl;
+      }
+    };
   }
 });
 
@@ -947,6 +1006,8 @@ function sleepMs(ms, signal) {
   });
 }
 function friendlyError(status, text) {
+  const detail = ccaFailureDetail(status, text);
+  if (detail.validationUrl) return detail.message;
   const parsed = safeJson(text);
   if (isJsonRecord(parsed) && isJsonRecord(parsed.error) && typeof parsed.error.message === "string") {
     const details = parsed.error.details;
@@ -1554,7 +1615,13 @@ function registerApiRoutes(ctx, runtime, ns) {
         results.push({ ...base, status: "ok", quota: quota ?? null });
       } catch (error) {
         const message = error instanceof Error && error.message.length > 0 ? error.message : "\u989D\u5EA6\u8BFB\u53D6\u5931\u8D25";
-        results.push({ ...base, status: "error", message: redactSecrets(message, account, current) });
+        const validationUrl = error instanceof CcaApiError ? error.validationUrl : void 0;
+        results.push({
+          ...base,
+          status: "error",
+          message: redactSecrets(message, account, current),
+          ...validationUrl ? { validationUrl: redactSecrets(validationUrl, account, current) } : {}
+        });
       }
       if (signal?.aborted) break;
     }
@@ -1937,6 +2004,7 @@ export {
   activeAccountFrom,
   apply,
   buildRequest,
+  credentialPath,
   decodeCredentialStore,
   deleteCredentialStore,
   effortToThinkingLevel,
@@ -1944,6 +2012,7 @@ export {
   findAccountIndex,
   generationConfigFor,
   inject,
+  modelConfigPath,
   name,
   parseGeminiGroundingChunks,
   publicAccountId,
