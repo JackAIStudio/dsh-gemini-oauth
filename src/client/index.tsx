@@ -5,8 +5,7 @@ import { zh, en, NS } from "./i18n";
 import { installStyle, GEMINI_NAV_MARKER } from "./styles";
 import { GeminiIcon } from "./components/GeminiIcon";
 import { GeminiSettings } from "./GeminiSettings";
-import { GeminiUsageChip } from "./components/GeminiUsageChip";
-import { startGlobalPolling } from "./quota-state";
+import { startGlobalPolling, pollQuota } from "./quota-state";
 
 export const inject = ["slots", "locale"];
 
@@ -68,27 +67,7 @@ export function apply(ctx: any): void {
     )
   );
 
-  ctx.slots.inject("conversation.composer.dock", () =>
-    ctx.slots.register(
-      {
-        name: "conversation.composer.dock",
-        id: "dsh-gemini-oauth-usage-dock",
-        order: -9,
-        label: () => "Gemini OAuth",
-      },
-      (props: any) => <GeminiUsageChip {...props} seat="dock" ctx={ctx} />
-    )
-  );
-
-  ctx.slots.inject("conversation.input.dock", () =>
-    ctx.slots.register(
-      {
-        name: "conversation.input.dock",
-        id: "dsh-gemini-oauth-usage-hero",
-        order: 51,
-        label: () => "Gemini OAuth",
-      },
-      (props: any) => <GeminiUsageChip {...props} seat="hero" ctx={ctx} />
-    )
-  );
+  if (typeof window !== "undefined") {
+    (window as any).__DSH_MODEL_QUOTAS__?.registerRefresh?.("gemini", () => pollQuota(true));
+  }
 }

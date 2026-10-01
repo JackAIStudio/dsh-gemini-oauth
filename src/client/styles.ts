@@ -5,27 +5,7 @@ export const GEMINI_NAV_MARKER = "data-dsh-gemini-settings-nav";
 const GEMINI_PATH = "M12 2c-.6 5-4 8.5-9 9 5 .5 8.4 4 9 9 .6-5 4-8.5 9-9-5-.5-8.4-4-9-9Z";
 const GEMINI_MASK_SVG = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='${GEMINI_PATH}' fill='black'/%3E%3C/svg%3E")`;
 
-export const DOCK_CSS = `
-[data-slot="conversation.composer.dock"]:has(> .dgo-usage-dock){display:flex!important;flex-flow:row nowrap;justify-content:center;align-items:center;box-sizing:border-box;width:100%;max-width:var(--dsh-chat-content-width);min-width:0;padding:4px calc(var(--dsh-composer-side-clearance) + 16px) 0;overflow:hidden}
-[data-slot="conversation.composer.dock"]:has(> .dgo-usage-dock)>*{box-sizing:border-box;flex:0 1 auto;min-width:0;width:auto!important;max-width:none!important;margin:0!important;padding:0!important}
-[data-phase="hero"] [data-slot="conversation.input.dock"]:has(> .dgo-usage-dock){display:flex!important;flex:none!important;flex-flow:row nowrap;justify-content:center;align-items:center;box-sizing:border-box;width:100%;max-width:var(--dsh-chat-content-width);min-width:0;min-height:20px;padding:4px calc(var(--dsh-composer-side-clearance) + 16px);overflow:visible;order:30;align-self:center}
-[data-phase="hero"] [data-slot="conversation.input.dock"]:has(> .dgo-usage-dock)>*{box-sizing:border-box;flex:0 1 auto;min-width:0;width:auto!important;max-width:none!important;margin:0!important;padding:0!important}
-.dgo-usage-dock{display:inline-flex;align-items:center;flex:none;line-height:20px}
-[data-slot="conversation.composer.dock"]:has(> .dgo-usage-dock)>.dgo-usage-dock{flex:none;overflow:visible}
-[data-phase="hero"] [data-slot="conversation.input.dock"]:has(> .dgo-usage-dock)>.dgo-usage-dock{flex:none;overflow:visible}
-.dgo-usage-dock:not(:last-child):after{content:"|";color:var(--dsw-alias-separator-primary);margin:0 10px;font-size:12px;line-height:20px}
-.dgo-usage{appearance:none;display:inline-flex;align-items:center;gap:6px;height:20px;padding:0 2px;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-label-tertiary);font:inherit;font-size:12px;line-height:20px;letter-spacing:.01em;white-space:nowrap;cursor:pointer;user-select:none}
-.dgo-usage:hover,.dgo-usage:focus-visible{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary);outline:none}
-.dgo-usage-amount{color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
-.dgo-usage.is-warn .dgo-usage-amount{color:var(--dsw-alias-state-warn-primary)}
-.dgo-usage.is-alert .dgo-usage-amount{color:var(--dsw-alias-state-error-primary)}
-.dgo-usage-mark{display:block;opacity:.78;flex:none}
-.dgo-usage:hover .dgo-usage-mark,.dgo-usage:focus-visible .dgo-usage-mark{opacity:.95}
-.dgo-usage.is-loading .dgo-usage-mark{opacity:.95;animation:dgo-usage-spin .8s linear infinite}
-@media (prefers-reduced-motion:reduce){.dgo-usage.is-loading .dgo-usage-mark{animation:none}}
-@keyframes dgo-usage-spin{to{transform:rotate(360deg)}}
-@media (max-width:640px){[data-slot="conversation.composer.dock"]:has(> .dgo-usage-dock),[data-phase="hero"] [data-slot="conversation.input.dock"]:has(> .dgo-usage-dock){padding-left:12px;padding-right:12px}}
-`;
+export const DOCK_CSS = "";
 
 export function installStyle(): void {
   if (typeof document === "undefined") return;

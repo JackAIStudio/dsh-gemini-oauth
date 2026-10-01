@@ -110,6 +110,7 @@ export function publishQuota(value?: QuotaDataResponse | null): void {
   sharedQuotaLoading = false;
   lastFetchAt = Date.now();
   notifyQuotaListeners();
+  syncGeminiToGlobalBus();
 }
 
 export async function pollQuota(force = false): Promise<void> {
@@ -142,10 +143,34 @@ export async function pollQuota(force = false): Promise<void> {
       sharedQuotaLoading = false;
       inFlightPoll = null;
       notifyQuotaListeners();
+      syncGeminiToGlobalBus();
     }
   })();
 
   return inFlightPoll;
+}
+
+export function syncGeminiToGlobalBus(): void {
+  if (typeof window === "undefined") return;
+  const bus = (window as any).__DSH_MODEL_QUOTAS__;
+  if (!bus || typeof bus.set !== "function") return;
+  const quota = sharedQuota;
+  if (!quota) return;
+  const parsed = parseQuota(quota);
+  const val = parsed.gemini5h ?? parsed.geminiWeek;
+  if (val === null || val === undefined) return;
+  const isDanger = val < 10;
+  const isWarn = val < 25;
+  const displayText = isDanger ? `告急 (${val}%)` : `${val}% 剩余`;
+  const kind = isDanger ? "alert" : isWarn ? "warn" : "ready";
+  bus.set("gemini", {
+    label: displayText,
+    val,
+    kind,
+    loading: sharedQuotaLoading,
+    tooltip: `Gemini: ${displayText}`,
+    fetchedAt: sharedQuotaFetchedAt,
+  });
 }
 
 export function startGlobalPolling(): void {

@@ -169,27 +169,7 @@ var STYLE_ID = "dsh-gemini-oauth-settings-style";
 var GEMINI_NAV_MARKER = "data-dsh-gemini-settings-nav";
 var GEMINI_PATH = "M12 2c-.6 5-4 8.5-9 9 5 .5 8.4 4 9 9 .6-5 4-8.5 9-9-5-.5-8.4-4-9-9Z";
 var GEMINI_MASK_SVG = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='${GEMINI_PATH}' fill='black'/%3E%3C/svg%3E")`;
-var DOCK_CSS = `
-[data-slot="conversation.composer.dock"]:has(> .dgo-usage-dock){display:flex!important;flex-flow:row nowrap;justify-content:center;align-items:center;box-sizing:border-box;width:100%;max-width:var(--dsh-chat-content-width);min-width:0;padding:4px calc(var(--dsh-composer-side-clearance) + 16px) 0;overflow:hidden}
-[data-slot="conversation.composer.dock"]:has(> .dgo-usage-dock)>*{box-sizing:border-box;flex:0 1 auto;min-width:0;width:auto!important;max-width:none!important;margin:0!important;padding:0!important}
-[data-phase="hero"] [data-slot="conversation.input.dock"]:has(> .dgo-usage-dock){display:flex!important;flex:none!important;flex-flow:row nowrap;justify-content:center;align-items:center;box-sizing:border-box;width:100%;max-width:var(--dsh-chat-content-width);min-width:0;min-height:20px;padding:4px calc(var(--dsh-composer-side-clearance) + 16px);overflow:visible;order:30;align-self:center}
-[data-phase="hero"] [data-slot="conversation.input.dock"]:has(> .dgo-usage-dock)>*{box-sizing:border-box;flex:0 1 auto;min-width:0;width:auto!important;max-width:none!important;margin:0!important;padding:0!important}
-.dgo-usage-dock{display:inline-flex;align-items:center;flex:none;line-height:20px}
-[data-slot="conversation.composer.dock"]:has(> .dgo-usage-dock)>.dgo-usage-dock{flex:none;overflow:visible}
-[data-phase="hero"] [data-slot="conversation.input.dock"]:has(> .dgo-usage-dock)>.dgo-usage-dock{flex:none;overflow:visible}
-.dgo-usage-dock:not(:last-child):after{content:"|";color:var(--dsw-alias-separator-primary);margin:0 10px;font-size:12px;line-height:20px}
-.dgo-usage{appearance:none;display:inline-flex;align-items:center;gap:6px;height:20px;padding:0 2px;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-label-tertiary);font:inherit;font-size:12px;line-height:20px;letter-spacing:.01em;white-space:nowrap;cursor:pointer;user-select:none}
-.dgo-usage:hover,.dgo-usage:focus-visible{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary);outline:none}
-.dgo-usage-amount{color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
-.dgo-usage.is-warn .dgo-usage-amount{color:var(--dsw-alias-state-warn-primary)}
-.dgo-usage.is-alert .dgo-usage-amount{color:var(--dsw-alias-state-error-primary)}
-.dgo-usage-mark{display:block;opacity:.78;flex:none}
-.dgo-usage:hover .dgo-usage-mark,.dgo-usage:focus-visible .dgo-usage-mark{opacity:.95}
-.dgo-usage.is-loading .dgo-usage-mark{opacity:.95;animation:dgo-usage-spin .8s linear infinite}
-@media (prefers-reduced-motion:reduce){.dgo-usage.is-loading .dgo-usage-mark{animation:none}}
-@keyframes dgo-usage-spin{to{transform:rotate(360deg)}}
-@media (max-width:640px){[data-slot="conversation.composer.dock"]:has(> .dgo-usage-dock),[data-phase="hero"] [data-slot="conversation.input.dock"]:has(> .dgo-usage-dock){padding-left:12px;padding-right:12px}}
-`;
+var DOCK_CSS = "";
 function installStyle() {
   if (typeof document === "undefined") return;
   let style = document.getElementById(STYLE_ID);
@@ -451,6 +431,7 @@ function publishQuota(value) {
   sharedQuotaLoading = false;
   lastFetchAt = Date.now();
   notifyQuotaListeners();
+  syncGeminiToGlobalBus();
 }
 async function pollQuota(force = false) {
   if (!force && (typeof document !== "undefined" && (document.hidden || !document.hasFocus()) || lastFetchAt > 0 && Date.now() - lastFetchAt < FOCUS_DEBOUNCE_MS && sharedQuota !== null)) {
@@ -474,9 +455,32 @@ async function pollQuota(force = false) {
       sharedQuotaLoading = false;
       inFlightPoll = null;
       notifyQuotaListeners();
+      syncGeminiToGlobalBus();
     }
   })();
   return inFlightPoll;
+}
+function syncGeminiToGlobalBus() {
+  if (typeof window === "undefined") return;
+  const bus = window.__DSH_MODEL_QUOTAS__;
+  if (!bus || typeof bus.set !== "function") return;
+  const quota = sharedQuota;
+  if (!quota) return;
+  const parsed = parseQuota(quota);
+  const val = parsed.gemini5h ?? parsed.geminiWeek;
+  if (val === null || val === void 0) return;
+  const isDanger = val < 10;
+  const isWarn = val < 25;
+  const displayText = isDanger ? `\u544A\u6025 (${val}%)` : `${val}% \u5269\u4F59`;
+  const kind = isDanger ? "alert" : isWarn ? "warn" : "ready";
+  bus.set("gemini", {
+    label: displayText,
+    val,
+    kind,
+    loading: sharedQuotaLoading,
+    tooltip: `Gemini: ${displayText}`,
+    fetchedAt: sharedQuotaFetchedAt
+  });
 }
 function startGlobalPolling() {
   if (quotaPollTimer === void 0 && typeof window !== "undefined") {
@@ -1006,132 +1010,8 @@ function GeminiSettings({ ctx }) {
   ] });
 }
 
-// src/client/components/GeminiUsageChip.tsx
-var import_react3 = require("react");
-var import_jsx_runtime8 = require("react/jsx-runtime");
-function isBlankComposer(useSession) {
-  if (typeof document !== "undefined") {
-    const phase = document.querySelector("[data-phase]")?.getAttribute("data-phase");
-    if (phase === "hero" || phase === "settling") return true;
-    if (phase === "active") return false;
-  }
-  if (typeof useSession !== "function") return true;
-  const snap = useSession((s) => s);
-  if (snap && typeof snap === "object") {
-    if (snap.composerPhase === "blank") return true;
-    if (snap.blank === true && snap.promptAttempted !== true) return true;
-  }
-  return false;
-}
-function buildTooltip(quota, fetchedAt, t) {
-  const buckets = geminiQuotaBuckets(quota);
-  if (buckets.length === 0) return t("quota");
-  const lines = ["Gemini \u989D\u5EA6\u8BE6\u60C5"];
-  for (const b of buckets) {
-    const pct = Math.max(0, Math.min(100, Math.round((b.remainingFraction ?? 0) * 1e3) / 10));
-    const resetStr = b.resetTime ? ` \xB7 ${t("resetPrefix", { time: formatReset(b.resetTime, t) })}` : "";
-    lines.push(`${quotaBucketLabel(b, t)}\uFF1A${pct}% \u5269\u4F59${resetStr}`);
-  }
-  if (fetchedAt) {
-    try {
-      const timeStr = new Date(fetchedAt).toLocaleTimeString("zh-CN", {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit"
-      });
-      lines.push(`
-\u66F4\u65B0\u4E8E ${timeStr}`);
-    } catch (_) {
-    }
-  }
-  lines.push("\u70B9\u51FB\u5237\u65B0");
-  return lines.join("\n");
-}
-function GeminiUsageChip(props) {
-  const [, bump] = (0, import_react3.useState)(0);
-  const blank = isBlankComposer(props.useSession);
-  const running = typeof props.useSession === "function" ? props.useSession((s) => s?.running) : false;
-  const prevRunning = (0, import_react3.useRef)(running);
-  const t = (0, import_react3.useMemo)(() => createTranslator(props.ctx), [props.ctx]);
-  (0, import_react3.useEffect)(() => {
-    startGlobalPolling();
-    if (sharedQuota === null) void pollQuota(true);
-    const handler = () => bump((n) => n + 1);
-    quotaListeners.add(handler);
-    return () => {
-      quotaListeners.delete(handler);
-    };
-  }, []);
-  (0, import_react3.useEffect)(() => {
-    if (prevRunning.current === true && running === false) {
-      void pollQuota(true);
-    }
-    prevRunning.current = running;
-  }, [running]);
-  if (props.seat && props.seat === "hero" !== blank) {
-    return null;
-  }
-  const quota = sharedQuota;
-  if (!quota) {
-    if (sharedQuotaLoading) {
-      return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "dgo-usage-dock", children: /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(
-        "button",
-        {
-          type: "button",
-          className: "dgo-usage is-loading",
-          title: "Gemini \u989D\u5EA6\u67E5\u8BE2\u4E2D...",
-          "aria-label": "Gemini \u989D\u5EA6\u67E5\u8BE2\u4E2D...",
-          onMouseDown: (e) => e.preventDefault(),
-          onClick: (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            void pollQuota(true);
-          },
-          children: [
-            /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "dgo-usage-mark", children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(GeminiIcon, { size: 12 }) }),
-            /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "dgo-usage-amount", children: "..." })
-          ]
-        }
-      ) });
-    }
-    return null;
-  }
-  const parsed = parseQuota(quota);
-  const val = parsed.gemini5h ?? parsed.geminiWeek;
-  if (val === null || val === void 0) return null;
-  const isDanger = val < 10;
-  const isWarn = val < 25;
-  const displayText = isDanger ? t("quotaDanger", { val }) || `\u544A\u6025 (${val}%)` : t("quotaRemaining", { val }) || `${val}% \u5269\u4F59`;
-  const loading = sharedQuotaLoading;
-  const className = [
-    "dgo-usage",
-    loading ? "is-loading" : "",
-    isDanger ? "is-alert" : isWarn ? "is-warn" : ""
-  ].filter(Boolean).join(" ");
-  const tooltipTitle = buildTooltip(quota, sharedQuotaFetchedAt, t);
-  return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "dgo-usage-dock", children: /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(
-    "button",
-    {
-      type: "button",
-      className,
-      title: tooltipTitle,
-      "aria-label": `Gemini ${displayText}`,
-      onMouseDown: (e) => e.preventDefault(),
-      onClick: (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        void pollQuota(true);
-      },
-      children: [
-        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "dgo-usage-mark", children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(GeminiIcon, { size: 12 }) }),
-        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "dgo-usage-amount", children: displayText })
-      ]
-    }
-  ) });
-}
-
 // src/client/index.tsx
-var import_jsx_runtime9 = require("react/jsx-runtime");
+var import_jsx_runtime8 = require("react/jsx-runtime");
 var inject = ["slots", "locale"];
 function registerGeminiSettingsNavIcon() {
   if (typeof document === "undefined") return () => {
@@ -1184,35 +1064,14 @@ function apply(ctx) {
         id: "gemini-oauth",
         order: 13,
         label: () => "Gemini OAuth \u767B\u5F55",
-        icon: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(GeminiIcon, { size: 14 })
+        icon: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(GeminiIcon, { size: 14 })
       },
-      (props) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(GeminiSettings, { ...props, ctx })
+      (props) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(GeminiSettings, { ...props, ctx })
     )
   );
-  ctx.slots.inject(
-    "conversation.composer.dock",
-    () => ctx.slots.register(
-      {
-        name: "conversation.composer.dock",
-        id: "dsh-gemini-oauth-usage-dock",
-        order: -9,
-        label: () => "Gemini OAuth"
-      },
-      (props) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(GeminiUsageChip, { ...props, seat: "dock", ctx })
-    )
-  );
-  ctx.slots.inject(
-    "conversation.input.dock",
-    () => ctx.slots.register(
-      {
-        name: "conversation.input.dock",
-        id: "dsh-gemini-oauth-usage-hero",
-        order: 51,
-        label: () => "Gemini OAuth"
-      },
-      (props) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(GeminiUsageChip, { ...props, seat: "hero", ctx })
-    )
-  );
+  if (typeof window !== "undefined") {
+    window.__DSH_MODEL_QUOTAS__?.registerRefresh?.("gemini", () => pollQuota(true));
+  }
 }
 
 
