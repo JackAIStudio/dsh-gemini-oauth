@@ -49,22 +49,40 @@ function geminiBucketRank(bucket: QuotaBucket): number {
 }
 
 export function geminiQuotaBuckets(quota?: QuotaSummary | null): QuotaBucket[] {
-  const buckets = geminiQuotaGroups(quota).flatMap((group) => group.buckets ?? []);
+  const groups = geminiQuotaGroups(quota);
+  const showGroupName = groups.length > 1;
+  const buckets = groups.flatMap((group) => (group.buckets ?? []).map((bucket) => ({
+    ...bucket,
+    ...(showGroupName && group.displayName ? { groupDisplayName: group.displayName } : {}),
+  })));
   return [...buckets].sort((a, b) => geminiBucketRank(a) - geminiBucketRank(b));
+}
+
+function quotaGroupShortName(name?: string): string {
+  if (!name) return "";
+  if (/argon/i.test(name)) return "Argon";
+  if (/gemini/i.test(name)) return "Gemini";
+  return name;
 }
 
 export function quotaBucketLabel(bucket: QuotaBucket, t: Translator): string {
   const name = `${bucket.displayName || ""} ${bucket.bucketId || ""}`;
-  if (/week/i.test(name) || bucket.bucketId === "gemini-weekly") return t("quotaWeekly");
-  if (/5\s*hour|five\s*hour/i.test(name) || bucket.bucketId === "gemini-5h") return t("quotaFiveHour");
-  return bucket.displayName || bucket.bucketId || t("quota");
+  const label = /week/i.test(name) || bucket.bucketId === "gemini-weekly"
+    ? t("quotaWeekly")
+    : /5\s*hour|five\s*hour/i.test(name) || bucket.bucketId === "gemini-5h"
+      ? t("quotaFiveHour")
+      : bucket.displayName || bucket.bucketId || t("quota");
+  const group = quotaGroupShortName(bucket.groupDisplayName);
+  return group ? `${group} · ${label}` : label;
 }
 
 export function parseQuota(rawQuota?: QuotaSummary | null): ParsedQuota {
   const parsed: ParsedQuota = { gemini5h: null, geminiWeek: null, claude5h: null, claudeWeek: null };
   if (!rawQuota || !Array.isArray(rawQuota.groups)) return parsed;
   for (const group of rawQuota.groups) {
+    const groupName = `${group.displayName || ""} ${group.description || ""}`;
     const gemini = isGeminiQuotaGroup(group);
+    const argon = /argon/i.test(groupName);
     const claude = isClaudeGptQuotaGroup(group);
     if (!gemini && !claude) continue;
     if (!Array.isArray(group.buckets)) continue;
@@ -72,6 +90,8 @@ export function parseQuota(rawQuota?: QuotaSummary | null): ParsedQuota {
       const is5h = (bucket.displayName && /5\s*hour|five\s*hour/i.test(bucket.displayName)) || bucket.bucketId === "gemini-5h" || bucket.bucketId === "3p-5h";
       const isWeek = (bucket.displayName && /week/i.test(bucket.displayName)) || bucket.bucketId === "gemini-weekly" || bucket.bucketId === "3p-weekly";
       const val = Math.max(0, Math.min(100, Math.round((bucket.remainingFraction ?? 0) * 1000) / 10));
+      // 主 Gemini 池优先；只有没有主池数据时才回退到 Argon 池。
+      if (gemini && argon && (parsed.gemini5h !== null || parsed.geminiWeek !== null)) continue;
       if (gemini && is5h) parsed.gemini5h = val;
       if (gemini && isWeek) parsed.geminiWeek = val;
       if (claude && is5h) parsed.claude5h = val;

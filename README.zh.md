@@ -43,12 +43,13 @@ host 插件要重启 `dsh web` 才加载新的 `index.js`。
 
 1. 重启 `dsh web`。
 2. 设置 → **Gemini OAuth** → 登录（浏览器完成 Google OAuth）。
-3. 任意会话 `/model` 选择 `Gemini OAuth` 下的模型（如 Gemini 3.6 Flash High / Gemini 3.1 Pro (High)）。
+3. 任意会话 `/model` 选择 `Gemini OAuth` 下的模型（如 Gemini 4 Argon (High) / Gemini 3.8 Flash (High)）。
 4. 额度条在设置卡里；模型选择器中的模型来自 `fetchAvailableModels` 在线目录（5 分钟缓存），离线回退静态目录。
 
 ## 排错速查
 
 - **403 "You do not have a valid license"**：CCA 按 `User-Agent` 校验客户端身份，必须以 `antigravity/` 开头（本插件已把 DSH attribution 合并进 UA comment，勿移除）。
+- **额度为空 / 新模型（如 Gemini 4 Argon）不出现**：CCA 还会按 UA 里的客户端版本决定返回哪些模型和额度组。旧版 `antigravity/1.x` 只能拿到 Claude/GPT 额度组；请把 `src/common/constants.ts` 的 `ANTIGRAVITY_UA` 同步到当前 Antigravity 客户端（当前为 `antigravity/hub/2.25.0 ...`）。
 - **某模型 400 "invalid argument"**：两件事——① 工具参数里的 `$schema` / `$defs` / `$ref` / `type` 数组（插件已白名单清洗 + `$defs` 展开）；② `maxOutputTokens` 超模型上限（pro 65535 / gpt-oss 32768 / claude 64000，插件已按族截断）。
 - **"Gemini 3.1 Pro (High)" 请求 400**：consumer 线上该模型的真实请求 id 是 `gemini-pro-agent`（`gemini-3.1-pro-high` 只是同名显示），插件已内置别名映射。
 - **主端点 429 "Resource has been exhausted"**：个人账号上属端点 gating（`cloudcode-pa` 仅限企业/GCP 许可），与订阅余额无关（余额看 `retrieveUserQuotaSummary`）；个人账号默认只用 `daily-cloudcode-pa`，daily 上的 429 是瞬时风控/并发限流，插件会退避重试（2s/6s/14s），通常几十秒内自愈。

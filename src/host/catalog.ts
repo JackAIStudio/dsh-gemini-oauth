@@ -7,8 +7,10 @@ import { publicAccountId } from "./store";
 
 // Cloud Code Assist 各模型族的最大输出上限（超限 = HTTP 400）。
 export function maxOutputTokensFor(modelId: string): number {
+  if (modelId.startsWith("claude-opus-5-5") || modelId.startsWith("claude-sonnet-5-5")) return 128_000;
   if (modelId.startsWith("claude-")) return 64_000;
   if (modelId.startsWith("gpt-oss-")) return 32_768;
+  if (modelId === "gemini-3.5-flash-lite") return 65_535;
   // pro 系（含 gemini-pro-agent / gemini-3.1-pro-*）上限 65535，超 1 也会 400。
   if (modelId.startsWith("gemini-3.1-pro") || modelId.startsWith("gemini-pro-")) return 65_535;
   return 65_536;
@@ -18,15 +20,20 @@ export function modelDescriptor(
   id: string,
   name: string,
   family: "gemini" | "claude" | "gpt",
-  extra: { maxOutputTokens?: number } = {},
+  extra: {
+    maxOutputTokens?: number;
+    contextWindow?: number;
+    inputModalities?: ("text" | "image")[];
+  } = {},
 ): ModelDescriptor {
-  const contextWindow = family === "gemini" ? 1_048_576 : family === "claude" ? 200_000 : 131_072;
+  const contextWindow = extra.contextWindow
+    ?? (family === "gemini" ? 1_048_576 : family === "claude" ? 200_000 : 131_072);
   const isTiered = id.endsWith("-tiered");
   return {
     id,
     name,
     provider: PROVIDER,
-    inputModalities: family === "gemini" ? ["text", "image"] : ["text"],
+    inputModalities: extra.inputModalities ?? (family === "gemini" ? ["text", "image"] : ["text"]),
     thinking: true,
     contextWindow,
     maxTokens: extra.maxOutputTokens ?? maxOutputTokensFor(id),
@@ -46,7 +53,13 @@ export function modelDescriptor(
 }
 
 export const STATIC_CATALOG: ModelDescriptor[] = [
+  modelDescriptor("gemini-4-argon-high", "Gemini 4 Argon (High)", "gemini"),
+  modelDescriptor("gemini-4-argon-medium", "Gemini 4 Argon (Medium)", "gemini"),
+  modelDescriptor("gemini-4-argon-low", "Gemini 4 Argon (Low)", "gemini"),
   modelDescriptor("gemini-3.8-flash-tiered", "Gemini 3.8 Flash (Tiered)", "gemini"),
+  modelDescriptor("gemini-3.8-flash-high", "Gemini 3.8 Flash (High)", "gemini"),
+  modelDescriptor("gemini-3.8-flash-medium", "Gemini 3.8 Flash (Medium)", "gemini"),
+  modelDescriptor("gemini-3.8-flash-low", "Gemini 3.8 Flash (Low)", "gemini"),
   modelDescriptor("gemini-3.7-flash-tiered", "Gemini 3.7 Flash (Tiered)", "gemini"),
   modelDescriptor("gemini-3.6-flash-high", "Gemini 3.6 Flash (High)", "gemini"),
   modelDescriptor("gemini-3.6-flash-medium", "Gemini 3.6 Flash (Medium)", "gemini"),
@@ -54,6 +67,7 @@ export const STATIC_CATALOG: ModelDescriptor[] = [
   modelDescriptor("gemini-3.5-flash-high", "Gemini 3.5 Flash (High)", "gemini"),
   modelDescriptor("gemini-3.5-flash-low", "Gemini 3.5 Flash (Low)", "gemini"),
   modelDescriptor("gemini-3.5-flash-extra-low", "Gemini 3.5 Flash (Extra Low)", "gemini"),
+  modelDescriptor("gemini-3.5-flash-lite", "Gemini 3.5 Flash Lite", "gemini"),
   modelDescriptor("gemini-pro-agent", "Gemini 3.1 Pro (High)", "gemini"),
   modelDescriptor("gemini-3.1-pro-low", "Gemini 3.1 Pro (Low)", "gemini"),
   modelDescriptor("gemini-3.1-flash-lite", "Gemini 3.1 Flash Lite", "gemini"),
@@ -62,6 +76,37 @@ export const STATIC_CATALOG: ModelDescriptor[] = [
   modelDescriptor("gemini-2.5-flash-lite", "Gemini 2.5 Flash Lite", "gemini"),
   modelDescriptor("gemini-2.5-flash-thinking", "Gemini 2.5 Flash (Thinking)", "gemini"),
   modelDescriptor("gemini-3-flash", "Gemini 3 Flash", "gemini"),
+  modelDescriptor("gemini-3-flash-agent", "Gemini 3 Flash Agent", "gemini"),
+  modelDescriptor("claude-opus-5-5-high", "Claude Opus 5.5 (High)", "claude", {
+    contextWindow: 1_000_000,
+    maxOutputTokens: 128_000,
+    inputModalities: ["text", "image"],
+  }),
+  modelDescriptor("claude-opus-5-5-medium", "Claude Opus 5.5 (Medium)", "claude", {
+    contextWindow: 1_000_000,
+    maxOutputTokens: 128_000,
+    inputModalities: ["text", "image"],
+  }),
+  modelDescriptor("claude-opus-5-5-low", "Claude Opus 5.5 (Low)", "claude", {
+    contextWindow: 1_000_000,
+    maxOutputTokens: 128_000,
+    inputModalities: ["text", "image"],
+  }),
+  modelDescriptor("claude-sonnet-5-5-high", "Claude Sonnet 5.5 (High)", "claude", {
+    contextWindow: 1_000_000,
+    maxOutputTokens: 128_000,
+    inputModalities: ["text", "image"],
+  }),
+  modelDescriptor("claude-sonnet-5-5-medium", "Claude Sonnet 5.5 (Medium)", "claude", {
+    contextWindow: 1_000_000,
+    maxOutputTokens: 128_000,
+    inputModalities: ["text", "image"],
+  }),
+  modelDescriptor("claude-sonnet-5-5-low", "Claude Sonnet 5.5 (Low)", "claude", {
+    contextWindow: 1_000_000,
+    maxOutputTokens: 128_000,
+    inputModalities: ["text", "image"],
+  }),
   modelDescriptor("claude-sonnet-4-6", "Claude Sonnet 4.6 (Thinking)", "claude"),
   modelDescriptor("claude-opus-4-6-thinking", "Claude Opus 4.6 (Thinking)", "claude"),
   modelDescriptor("gpt-oss-120b-medium", "GPT-OSS 120B (Medium)", "gpt"),
@@ -112,10 +157,21 @@ export function isSessionTitleRequest(options: { purpose?: string } | null | und
 export function thinkingConfigFor(
   modelId: string,
   options: { purpose?: string; reasoningEffort?: string } = {},
-): { thinkingLevel: "HIGH" | "MEDIUM" | "LOW" } | undefined {
-  if (!modelId.endsWith("-tiered")) return undefined;
-  if (isSessionTitleRequest(options)) return { thinkingLevel: "LOW" };
-  return { thinkingLevel: effortToThinkingLevel(options.reasoningEffort) };
+): { thinkingLevel: "HIGH" | "MEDIUM" | "LOW"; includeThoughts?: boolean } | undefined {
+  if (modelId.endsWith("-tiered")) {
+    if (isSessionTitleRequest(options)) return { thinkingLevel: "LOW" };
+    return { thinkingLevel: effortToThinkingLevel(options.reasoningEffort) };
+  }
+  // Gemini 4 Argon / 3.8 Flash 把档位写进了模型 id，请求里仍要带
+  // thinkingLevel；Antigravity 官方客户端还会要求 includeThoughts。
+  const effortMatch = /^gemini-(?:4-argon|3\.8-flash)-(high|medium|low)$/.exec(modelId);
+  if (effortMatch !== null) {
+    return {
+      thinkingLevel: effortMatch[1].toUpperCase() as "HIGH" | "MEDIUM" | "LOW",
+      includeThoughts: !isSessionTitleRequest(options),
+    };
+  }
+  return undefined;
 }
 
 export function resolveMaxOutputTokens(

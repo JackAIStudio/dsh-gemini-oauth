@@ -5,6 +5,7 @@ import { LlmError, attributionHeaders } from "@deepseek-ai/dsh-llm";
 const CallId = (id: string) => id as any;
 import {
   PROVIDER,
+  ANTIGRAVITY_UA,
   ENDPOINTS,
   LOCATION_RETRY_PATTERN,
   TRANSIENT_BACKOFF_MS,
@@ -249,8 +250,8 @@ export async function* streamChunks(
     const attribution = attributionHeaders();
     const { "user-agent": attributionUa, ...attributionRest } = attribution as any;
     const mergedUa = attributionUa
-      ? `antigravity/1.15.8 darwin/arm64 (${attributionUa})`
-      : "antigravity/1.15.8 darwin/arm64";
+      ? `${ANTIGRAVITY_UA} (${attributionUa})`
+      : ANTIGRAVITY_UA;
 
     const sendOnce = async () => {
       const response = await fetchImpl(`${endpoint}/v1internal:streamGenerateContent?alt=sse`, {

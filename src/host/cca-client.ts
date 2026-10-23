@@ -1,7 +1,7 @@
 // Cloud Code Assist (CCA) HTTP communication and project/account discovery
 
 import { createHash } from "node:crypto";
-import { ENDPOINTS, PROJECT_CACHE_TTL_MS, ACCOUNT_PROFILE_TTL_MS } from "../common/constants";
+import { ANTIGRAVITY_UA, ENDPOINTS, PROJECT_CACHE_TTL_MS, ACCOUNT_PROFILE_TTL_MS } from "../common/constants";
 import type { AccountRecord, QuotaSummary } from "../common/types";
 import { publicAccountId, safeJson } from "./store";
 import type { EgressInfo, FetchJsonResult } from "./types";
@@ -11,9 +11,9 @@ export function ccaHeaders(token: string): Record<string, string> {
     authorization: `Bearer ${token}`,
     "content-type": "application/json",
     accept: "application/json",
-    "user-agent": "antigravity/1.15.8 darwin/arm64",
-    "x-goog-api-client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
-    "client-metadata": JSON.stringify({ ideType: "ANTIGRAVITY", platform: "MACOS", pluginType: "GEMINI" }),
+    // 与 Antigravity 2.25.0 官方客户端保持一致；旧版 UA 会被 CCA 当成旧客户端，
+    // 导致 Gemini 额度组缺失、Gemini 4 Argon 等新模型不可见/不可用。
+    "user-agent": ANTIGRAVITY_UA,
   };
 }
 

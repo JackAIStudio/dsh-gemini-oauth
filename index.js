@@ -11,7 +11,7 @@ var __export = (target, all) => {
 };
 
 // src/common/constants.ts
-var PROVIDER, PROVIDER_NAME, SETTINGS_NS_TEXT, CREDENTIAL_FILENAME, MODEL_CONFIG_FILENAME, API_PATH, AUTH_URL, TOKEN_URL, REDIRECT_PATH, DEFAULT_CALLBACK_PORT, SCOPES, ENDPOINTS, decodeBase64, DEFAULT_CLIENT_ID, DEFAULT_CLIENT_SECRET, MODEL_CACHE_TTL_MS, OAUTH_CALLBACK_TIMEOUT_MS, DISCOVERY_TIMEOUT_MS, PROJECT_CACHE_TTL_MS, ACCOUNT_PROFILE_TTL_MS, CREDENTIAL_VERSION, RUNTIME_MODEL_ALIASES, LOCATION_RETRY_PATTERN, TRANSIENT_BACKOFF_MS, LOCATION_HINT, GATED_ENDPOINT_HINT;
+var PROVIDER, PROVIDER_NAME, SETTINGS_NS_TEXT, CREDENTIAL_FILENAME, MODEL_CONFIG_FILENAME, API_PATH, ANTIGRAVITY_UA, AUTH_URL, TOKEN_URL, REDIRECT_PATH, DEFAULT_CALLBACK_PORT, SCOPES, ENDPOINTS, decodeBase64, DEFAULT_CLIENT_ID, DEFAULT_CLIENT_SECRET, MODEL_CACHE_TTL_MS, OAUTH_CALLBACK_TIMEOUT_MS, DISCOVERY_TIMEOUT_MS, PROJECT_CACHE_TTL_MS, ACCOUNT_PROFILE_TTL_MS, CREDENTIAL_VERSION, RUNTIME_MODEL_ALIASES, LOCATION_RETRY_PATTERN, TRANSIENT_BACKOFF_MS, LOCATION_HINT, GATED_ENDPOINT_HINT;
 var init_constants = __esm({
   "src/common/constants.ts"() {
     PROVIDER = "gemini-oauth";
@@ -20,6 +20,7 @@ var init_constants = __esm({
     CREDENTIAL_FILENAME = "gemini-oauth.json";
     MODEL_CONFIG_FILENAME = "gemini-oauth-models.json";
     API_PATH = "/gemini-oauth/api";
+    ANTIGRAVITY_UA = "antigravity/hub/2.25.0 (aidev_client; os_type=darwin; arch=arm64; cl=1003475615)";
     AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
     TOKEN_URL = "https://oauth2.googleapis.com/token";
     REDIRECT_PATH = "/oauth-callback";
@@ -298,9 +299,9 @@ function ccaHeaders(token) {
     authorization: `Bearer ${token}`,
     "content-type": "application/json",
     accept: "application/json",
-    "user-agent": "antigravity/1.15.8 darwin/arm64",
-    "x-goog-api-client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
-    "client-metadata": JSON.stringify({ ideType: "ANTIGRAVITY", platform: "MACOS", pluginType: "GEMINI" })
+    // 与 Antigravity 2.25.0 官方客户端保持一致；旧版 UA 会被 CCA 当成旧客户端，
+    // 导致 Gemini 额度组缺失、Gemini 4 Argon 等新模型不可见/不可用。
+    "user-agent": ANTIGRAVITY_UA
   };
 }
 async function postJson(fetchImpl, endpoint, path, token, body) {
@@ -482,19 +483,21 @@ init_constants();
 init_cca_client();
 init_store();
 function maxOutputTokensFor(modelId) {
+  if (modelId.startsWith("claude-opus-5-5") || modelId.startsWith("claude-sonnet-5-5")) return 128e3;
   if (modelId.startsWith("claude-")) return 64e3;
   if (modelId.startsWith("gpt-oss-")) return 32768;
+  if (modelId === "gemini-3.5-flash-lite") return 65535;
   if (modelId.startsWith("gemini-3.1-pro") || modelId.startsWith("gemini-pro-")) return 65535;
   return 65536;
 }
 function modelDescriptor(id, name2, family, extra = {}) {
-  const contextWindow = family === "gemini" ? 1048576 : family === "claude" ? 2e5 : 131072;
+  const contextWindow = extra.contextWindow ?? (family === "gemini" ? 1048576 : family === "claude" ? 2e5 : 131072);
   const isTiered = id.endsWith("-tiered");
   return {
     id,
     name: name2,
     provider: PROVIDER,
-    inputModalities: family === "gemini" ? ["text", "image"] : ["text"],
+    inputModalities: extra.inputModalities ?? (family === "gemini" ? ["text", "image"] : ["text"]),
     thinking: true,
     contextWindow,
     maxTokens: extra.maxOutputTokens ?? maxOutputTokensFor(id),
@@ -511,7 +514,13 @@ function modelDescriptor(id, name2, family, extra = {}) {
   };
 }
 var STATIC_CATALOG = [
+  modelDescriptor("gemini-4-argon-high", "Gemini 4 Argon (High)", "gemini"),
+  modelDescriptor("gemini-4-argon-medium", "Gemini 4 Argon (Medium)", "gemini"),
+  modelDescriptor("gemini-4-argon-low", "Gemini 4 Argon (Low)", "gemini"),
   modelDescriptor("gemini-3.8-flash-tiered", "Gemini 3.8 Flash (Tiered)", "gemini"),
+  modelDescriptor("gemini-3.8-flash-high", "Gemini 3.8 Flash (High)", "gemini"),
+  modelDescriptor("gemini-3.8-flash-medium", "Gemini 3.8 Flash (Medium)", "gemini"),
+  modelDescriptor("gemini-3.8-flash-low", "Gemini 3.8 Flash (Low)", "gemini"),
   modelDescriptor("gemini-3.7-flash-tiered", "Gemini 3.7 Flash (Tiered)", "gemini"),
   modelDescriptor("gemini-3.6-flash-high", "Gemini 3.6 Flash (High)", "gemini"),
   modelDescriptor("gemini-3.6-flash-medium", "Gemini 3.6 Flash (Medium)", "gemini"),
@@ -519,6 +528,7 @@ var STATIC_CATALOG = [
   modelDescriptor("gemini-3.5-flash-high", "Gemini 3.5 Flash (High)", "gemini"),
   modelDescriptor("gemini-3.5-flash-low", "Gemini 3.5 Flash (Low)", "gemini"),
   modelDescriptor("gemini-3.5-flash-extra-low", "Gemini 3.5 Flash (Extra Low)", "gemini"),
+  modelDescriptor("gemini-3.5-flash-lite", "Gemini 3.5 Flash Lite", "gemini"),
   modelDescriptor("gemini-pro-agent", "Gemini 3.1 Pro (High)", "gemini"),
   modelDescriptor("gemini-3.1-pro-low", "Gemini 3.1 Pro (Low)", "gemini"),
   modelDescriptor("gemini-3.1-flash-lite", "Gemini 3.1 Flash Lite", "gemini"),
@@ -527,6 +537,37 @@ var STATIC_CATALOG = [
   modelDescriptor("gemini-2.5-flash-lite", "Gemini 2.5 Flash Lite", "gemini"),
   modelDescriptor("gemini-2.5-flash-thinking", "Gemini 2.5 Flash (Thinking)", "gemini"),
   modelDescriptor("gemini-3-flash", "Gemini 3 Flash", "gemini"),
+  modelDescriptor("gemini-3-flash-agent", "Gemini 3 Flash Agent", "gemini"),
+  modelDescriptor("claude-opus-5-5-high", "Claude Opus 5.5 (High)", "claude", {
+    contextWindow: 1e6,
+    maxOutputTokens: 128e3,
+    inputModalities: ["text", "image"]
+  }),
+  modelDescriptor("claude-opus-5-5-medium", "Claude Opus 5.5 (Medium)", "claude", {
+    contextWindow: 1e6,
+    maxOutputTokens: 128e3,
+    inputModalities: ["text", "image"]
+  }),
+  modelDescriptor("claude-opus-5-5-low", "Claude Opus 5.5 (Low)", "claude", {
+    contextWindow: 1e6,
+    maxOutputTokens: 128e3,
+    inputModalities: ["text", "image"]
+  }),
+  modelDescriptor("claude-sonnet-5-5-high", "Claude Sonnet 5.5 (High)", "claude", {
+    contextWindow: 1e6,
+    maxOutputTokens: 128e3,
+    inputModalities: ["text", "image"]
+  }),
+  modelDescriptor("claude-sonnet-5-5-medium", "Claude Sonnet 5.5 (Medium)", "claude", {
+    contextWindow: 1e6,
+    maxOutputTokens: 128e3,
+    inputModalities: ["text", "image"]
+  }),
+  modelDescriptor("claude-sonnet-5-5-low", "Claude Sonnet 5.5 (Low)", "claude", {
+    contextWindow: 1e6,
+    maxOutputTokens: 128e3,
+    inputModalities: ["text", "image"]
+  }),
   modelDescriptor("claude-sonnet-4-6", "Claude Sonnet 4.6 (Thinking)", "claude"),
   modelDescriptor("claude-opus-4-6-thinking", "Claude Opus 4.6 (Thinking)", "claude"),
   modelDescriptor("gpt-oss-120b-medium", "GPT-OSS 120B (Medium)", "gpt")
@@ -567,9 +608,18 @@ function isSessionTitleRequest(options) {
   return options?.purpose === "session-title";
 }
 function thinkingConfigFor(modelId, options = {}) {
-  if (!modelId.endsWith("-tiered")) return void 0;
-  if (isSessionTitleRequest(options)) return { thinkingLevel: "LOW" };
-  return { thinkingLevel: effortToThinkingLevel(options.reasoningEffort) };
+  if (modelId.endsWith("-tiered")) {
+    if (isSessionTitleRequest(options)) return { thinkingLevel: "LOW" };
+    return { thinkingLevel: effortToThinkingLevel(options.reasoningEffort) };
+  }
+  const effortMatch = /^gemini-(?:4-argon|3\.8-flash)-(high|medium|low)$/.exec(modelId);
+  if (effortMatch !== null) {
+    return {
+      thinkingLevel: effortMatch[1].toUpperCase(),
+      includeThoughts: !isSessionTitleRequest(options)
+    };
+  }
+  return void 0;
 }
 function resolveMaxOutputTokens(modelId, options = {}, modelMax) {
   const cap = maxOutputTokensFor(modelId);
@@ -1184,7 +1234,7 @@ async function* streamChunks(fetchImpl, options, model, creds, attachments) {
     const body = JSON.stringify(await buildRequest(options, model, projectId, creds.access, attachments, options.signal));
     const attribution = attributionHeaders();
     const { "user-agent": attributionUa, ...attributionRest } = attribution;
-    const mergedUa = attributionUa ? `antigravity/1.15.8 darwin/arm64 (${attributionUa})` : "antigravity/1.15.8 darwin/arm64";
+    const mergedUa = attributionUa ? `${ANTIGRAVITY_UA} (${attributionUa})` : ANTIGRAVITY_UA;
     const sendOnce = async () => {
       const response2 = await fetchImpl(`${endpoint}/v1internal:streamGenerateContent?alt=sse`, {
         method: "POST",

@@ -51,6 +51,7 @@ export interface QuotaBucket {
   bucketId?: string;
   remainingFraction?: number;
   resetTime?: string;
+  groupDisplayName?: string;
 }
 
 export interface QuotaGroup {

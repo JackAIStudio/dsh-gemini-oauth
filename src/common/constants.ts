@@ -7,6 +7,13 @@ export const CREDENTIAL_FILENAME = "gemini-oauth.json";
 export const MODEL_CONFIG_FILENAME = "gemini-oauth-models.json";
 export const API_PATH = "/gemini-oauth/api";
 
+// Cloud Code Assist 会按客户端版本决定返回哪些模型和额度分组：
+// antigravity/1.x（以及 1.24）只返回 Claude/GPT 额度组，并把 Gemini 4 Argon
+// 从 fetchAvailableModels 里隐藏；2.25.0 的 hub UA 才会返回 Gemini 额度组、
+// Gemini 4 Argon 和周/5 小时桶。升级 Antigravity 时优先同步这里。
+export const ANTIGRAVITY_UA =
+  "antigravity/hub/2.25.0 (aidev_client; os_type=darwin; arch=arm64; cl=1003475615)";
+
 export const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 export const TOKEN_URL = "https://oauth2.googleapis.com/token";
 export const USERINFO_URL = "https://www.googleapis.com/oauth2/v1/userinfo?alt=json";
