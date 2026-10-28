@@ -1706,6 +1706,8 @@ function registerApiRoutes(ctx, runtime, ns) {
       return { ok: false, error: "enabledModelIds \u5FC5\u987B\u662F\u5B57\u7B26\u4E32\u6570\u7EC4" };
     }
     const enabled = await runtime.setEnabledModels(payload.enabledModelIds);
+    const llm = ctx.get?.("llm");
+    if (llm && typeof llm.emitAdaptersUpdated === "function") llm.emitAdaptersUpdated();
     return { ok: true, value: await modelsView(signal, enabled) };
   };
   const settingsView = (settings) => {

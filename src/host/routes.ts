@@ -299,6 +299,10 @@ export function registerApiRoutes(ctx: any, runtime: GemOAuthRuntime, ns: any): 
       return { ok: false, error: "enabledModelIds 必须是字符串数组" };
     }
     const enabled = await runtime.setEnabledModels(payload.enabledModelIds);
+    // 勾选变化只写本机 JSON；前端模型目录订阅的是 Host 广播的 llm/adapters-updated，
+    // 不广播的话新勾选的模型要重启应用才会出现在模型选择器里。
+    const llm = ctx.get?.("llm");
+    if (llm && typeof llm.emitAdaptersUpdated === "function") llm.emitAdaptersUpdated();
     return { ok: true, value: await modelsView(signal, enabled) };
   };
 
