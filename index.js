@@ -721,6 +721,25 @@ function modelIdentity(message) {
 function isGeminiFamily(modelId) {
   return !modelId.startsWith("claude-") && !modelId.startsWith("gpt-oss-");
 }
+async function toolResultParts(toolCallId, content, isError, model, attachments, signal, toolNames) {
+  const id = typeof toolCallId === "string" && toolCallId.length > 0 ? toolCallId : void 0;
+  const name2 = (id !== void 0 ? toolNames.get(id) : void 0) ?? "tool";
+  const text = serializeBlocks(content ?? []);
+  const response = isError === true ? { error: text } : { result: text };
+  const responseId = id !== void 0 && (model.id.startsWith("claude-") || model.id.startsWith("gpt-oss-")) ? { id } : {};
+  const parts = [{ functionResponse: { name: name2, ...responseId, response } }];
+  if (isError !== true && isGeminiFamily(model.id)) {
+    for (const sub of content ?? []) {
+      if (sub?.type !== "image") continue;
+      if (!attachments || typeof attachments.readImage !== "function") break;
+      const stored = await attachments.readImage(sub.attachment, signal);
+      const mimeType = stored?.ref?.mediaType ?? sub.attachment?.mediaType ?? "image/jpeg";
+      const data = stored?.data ?? new Uint8Array();
+      parts.push({ inlineData: { mimeType, data: Buffer.from(data).toString("base64") } });
+    }
+  }
+  return parts;
+}
 async function buildContents(options, attachments, signal, model) {
   const contents = [];
   const toolNames = /* @__PURE__ */ new Map();
@@ -734,6 +753,18 @@ async function buildContents(options, attachments, signal, model) {
     contents.push({ role, parts });
   };
   for (const message of options.messages ?? []) {
+    if (message.role === "tool") {
+      push("user", await toolResultParts(
+        message.toolCallId,
+        message.content,
+        message.isError === true,
+        model,
+        attachments,
+        signal,
+        toolNames
+      ));
+      continue;
+    }
     if (message.role === "assistant") {
       const parts2 = [];
       const identity = modelIdentity(message);
@@ -802,21 +833,15 @@ async function buildContents(options, attachments, signal, model) {
     }
     push("user", parts);
     for (const block of results) {
-      const name2 = toolNames.get(block.toolCallId) ?? "tool";
-      const text = serializeBlocks(block.content);
-      const response = block.isError === true ? { error: text } : { result: text };
-      const parts2 = [{ functionResponse: { name: name2, response } }];
-      if (block.isError !== true && isGeminiFamily(model.id)) {
-        for (const sub of block.content ?? []) {
-          if (sub?.type !== "image") continue;
-          if (!attachments || typeof attachments.readImage !== "function") break;
-          const stored = await attachments.readImage(sub.attachment, signal);
-          const mimeType = stored?.ref?.mediaType ?? sub.attachment?.mediaType ?? "image/jpeg";
-          const data = stored?.data ?? new Uint8Array();
-          parts2.push({ inlineData: { mimeType, data: Buffer.from(data).toString("base64") } });
-        }
-      }
-      push("user", parts2);
+      push("user", await toolResultParts(
+        block.toolCallId,
+        block.content,
+        block.isError === true,
+        model,
+        attachments,
+        signal,
+        toolNames
+      ));
     }
   }
   return contents;

@@ -89,6 +89,47 @@ export function isGeminiFamily(modelId: string): boolean {
   return !modelId.startsWith("claude-") && !modelId.startsWith("gpt-oss-");
 }
 
+/**
+ * 把一次工具调用的结果翻成一个或多个 CCA part。
+ *
+ * Host 有两条投递路径：独立的 `role: "tool"` 消息（带 toolCallId / isError），
+ * 以及 user 消息里的 `tool-result` 块。两条都必须变成 functionResponse，
+ * 否则工具输出会被当成普通对话文本，CCA 侧就看不到与之配对的 tool_result。
+ */
+async function toolResultParts(
+  toolCallId: any,
+  content: any,
+  isError: boolean,
+  model: ModelDescriptor,
+  attachments: any,
+  signal: AbortSignal | undefined,
+  toolNames: Map<string, string>,
+): Promise<any[]> {
+  const id = typeof toolCallId === "string" && toolCallId.length > 0 ? toolCallId : undefined;
+  const name = (id !== undefined ? toolNames.get(id) : undefined) ?? "tool";
+  const text = serializeBlocks(content ?? []);
+  const response = isError === true ? { error: text } : { result: text };
+  // Claude / GPT-OSS 走 Anthropic 兼容线：functionCall 与 functionResponse 必须带同一个
+  // id，否则 CCA 认不出这是哪次调用的结果，报 "tool_use ids were found without
+  // tool_result blocks immediately after"。Gemini 家不使用该字段，保持原样。
+  const responseId = id !== undefined
+    && (model.id.startsWith("claude-") || model.id.startsWith("gpt-oss-"))
+    ? { id }
+    : {};
+  const parts: any[] = [{ functionResponse: { name, ...responseId, response } }];
+  if (isError !== true && isGeminiFamily(model.id)) {
+    for (const sub of content ?? []) {
+      if (sub?.type !== "image") continue;
+      if (!attachments || typeof attachments.readImage !== "function") break;
+      const stored = await attachments.readImage(sub.attachment, signal);
+      const mimeType = stored?.ref?.mediaType ?? sub.attachment?.mediaType ?? "image/jpeg";
+      const data = stored?.data ?? new Uint8Array();
+      parts.push({ inlineData: { mimeType, data: Buffer.from(data).toString("base64") } });
+    }
+  }
+  return parts;
+}
+
 export async function buildContents(
   options: any,
   attachments: any,
@@ -108,6 +149,20 @@ export async function buildContents(
   };
 
   for (const message of options.messages ?? []) {
+    // Host 以独立消息投递工具结果（role: "tool"）。必须先把它转成 functionResponse，
+    // 否则会掉进下面的 user 分支被当成普通文本，CCA 侧就报 tool_use 缺 tool_result。
+    if (message.role === "tool") {
+      push("user", await toolResultParts(
+        message.toolCallId,
+        message.content,
+        message.isError === true,
+        model,
+        attachments,
+        signal,
+        toolNames,
+      ));
+      continue;
+    }
     if (message.role === "assistant") {
       const parts: any[] = [];
       const identity = modelIdentity(message);
@@ -177,21 +232,15 @@ export async function buildContents(
     push("user", parts);
 
     for (const block of results) {
-      const name = toolNames.get(block.toolCallId) ?? "tool";
-      const text = serializeBlocks(block.content);
-      const response = block.isError === true ? { error: text } : { result: text };
-      const parts: any[] = [{ functionResponse: { name, response } }];
-      if (block.isError !== true && isGeminiFamily(model.id)) {
-        for (const sub of block.content ?? []) {
-          if (sub?.type !== "image") continue;
-          if (!attachments || typeof attachments.readImage !== "function") break;
-          const stored = await attachments.readImage(sub.attachment, signal);
-          const mimeType = stored?.ref?.mediaType ?? sub.attachment?.mediaType ?? "image/jpeg";
-          const data = stored?.data ?? new Uint8Array();
-          parts.push({ inlineData: { mimeType, data: Buffer.from(data).toString("base64") } });
-        }
-      }
-      push("user", parts);
+      push("user", await toolResultParts(
+        block.toolCallId,
+        block.content,
+        block.isError === true,
+        model,
+        attachments,
+        signal,
+        toolNames,
+      ));
     }
   }
   return contents;
