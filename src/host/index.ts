@@ -56,7 +56,13 @@ import { buildRequest } from "./wire";
 import { GemOAuthAdapter, GemOAuthRuntime } from "./adapter";
 import { registerApiRoutes } from "./routes";
 import { getLoginSession, setLoginSession } from "./oauth";
-import { GEMINI_NATIVE_SEARCH_SERVICE, installGeminiNativeSearch, parseGeminiGroundingChunks } from "./native-search";
+import {
+  DEFAULT_SEARCH_MODEL,
+  GEMINI_NATIVE_SEARCH_SERVICE,
+  installGeminiNativeSearch,
+  parseGeminiGroundingChunks,
+  searchModelFor,
+} from "./native-search";
 
 export const name = "dsh-gemini-oauth";
 export const inject = ["llm"];
@@ -175,5 +181,7 @@ export {
   deleteCredentialStore,
   GemOAuthAdapter,
   GEMINI_NATIVE_SEARCH_SERVICE,
+  DEFAULT_SEARCH_MODEL,
+  searchModelFor,
   parseGeminiGroundingChunks,
 };

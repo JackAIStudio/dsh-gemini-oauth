@@ -1820,6 +1820,11 @@ init_cca_client();
 import { randomUUID as randomUUID3 } from "node:crypto";
 init_store();
 var GEMINI_NATIVE_SEARCH_SERVICE = "geminiNativeSearch";
+var DEFAULT_SEARCH_MODEL = "gemini-3.8-flash-tiered";
+function searchModelFor(requested) {
+  if (typeof requested !== "string" || requested.length === 0) return DEFAULT_SEARCH_MODEL;
+  return isGeminiFamily(requested) ? runtimeModelId(requested) : DEFAULT_SEARCH_MODEL;
+}
 function pushSource(sources, seen, url, title, snippet) {
   if (typeof url !== "string" || !/^https?:\/\//u.test(url)) return;
   const label = typeof title === "string" && title.length > 0 && title !== url ? title.trim() : void 0;
@@ -1891,7 +1896,7 @@ async function geminiNativeWebSearch(input) {
   const query = input.query.trim();
   if (query.length === 0) throw new Error("gemini native search: query must be non-empty");
   const endpoint = input.endpoint || ENDPOINTS[0];
-  const modelId = runtimeModelId(input.model && input.model.length > 0 ? input.model : "gemini-3.8-flash-tiered");
+  const modelId = searchModelFor(input.model);
   const body = {
     project: input.projectId,
     model: modelId,
@@ -2071,6 +2076,7 @@ function apply(ctx, config) {
 }
 export {
   Config,
+  DEFAULT_SEARCH_MODEL,
   GEMINI_NATIVE_SEARCH_SERVICE,
   GemOAuthAdapter,
   PROVIDER,
@@ -2099,6 +2105,7 @@ export {
   resetModelConfig,
   resolveMaxOutputTokens,
   runtimeModelId,
+  searchModelFor,
   storeFromLegacy,
   switchActiveAccount,
   thinkingConfigFor,

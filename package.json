@@ -44,7 +44,7 @@
     "watch": "node scripts/build.js --watch",
     "dev": "node scripts/build.js --watch",
     "typecheck": "tsc --noEmit",
-    "test": "node --import ./test-loader.mjs test-store.mjs && node --import ./test-loader.mjs test-routes.mjs && node --import ./test-loader.mjs test-session-title.mjs && node --import ./test-loader.mjs test-native-search.mjs && node --import ./test-loader.mjs test-signature-replay.mjs && node --import ./test-loader.mjs test-tool-response-id.mjs"
+    "test": "node --import ./test-loader.mjs test-store.mjs && node --import ./test-loader.mjs test-routes.mjs && node --import ./test-loader.mjs test-session-title.mjs && node --import ./test-loader.mjs test-native-search.mjs && node --import ./test-loader.mjs test-signature-replay.mjs && node --import ./test-loader.mjs test-tool-response-id.mjs && node --import ./test-loader.mjs test-search-model.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

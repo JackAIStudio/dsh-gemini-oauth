@@ -4,10 +4,24 @@ import { randomUUID } from "node:crypto";
 import { ENDPOINTS } from "../common/constants";
 import { ccaHeaders, projectForEndpoint } from "./cca-client";
 import { runtimeModelId } from "./catalog";
+import { isGeminiFamily } from "./wire";
 import { GemOAuthRuntime } from "./adapter";
 import { publicAccountId, safeJson } from "./store";
 
 export const GEMINI_NATIVE_SEARCH_SERVICE = "geminiNativeSearch";
+
+/**
+ * 原生 Google Search grounding 只有 Gemini 系模型支持。Claude / GPT-OSS 走的是
+ * Anthropic 兼容线，同样的 googleSearch 工具会返回 200 但 groundingMetadata 为空，
+ * 上层就把它当成「搜到 0 条」。所以非 Gemini 模型（例如在 gemini-oauth 里选了
+ * Claude Opus 5.5）一律回退到默认 Gemini 搜索模型。
+ */
+export const DEFAULT_SEARCH_MODEL = "gemini-3.8-flash-tiered";
+
+export function searchModelFor(requested: string | undefined): string {
+  if (typeof requested !== "string" || requested.length === 0) return DEFAULT_SEARCH_MODEL;
+  return isGeminiFamily(requested) ? runtimeModelId(requested) : DEFAULT_SEARCH_MODEL;
+}
 
 export interface GeminiSearchSource {
   url: string;
@@ -129,7 +143,7 @@ export async function geminiNativeWebSearch(input: {
   if (query.length === 0) throw new Error("gemini native search: query must be non-empty");
 
   const endpoint = input.endpoint || ENDPOINTS[0];
-  const modelId = runtimeModelId(input.model && input.model.length > 0 ? input.model : "gemini-3.8-flash-tiered");
+  const modelId = searchModelFor(input.model);
 
   const body = {
     project: input.projectId,
